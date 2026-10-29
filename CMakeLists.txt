@@ -25,6 +25,8 @@ juce_add_plugin(TunePXO_COBI
     COPY_PLUGIN_AFTER_BUILD FALSE
 )
 
+juce_generate_juce_header(TunePXO_COBI)
+
 target_sources(TunePXO_COBI PRIVATE
     Source/PluginProcessor.cpp
     Source/PluginEditor.cpp
