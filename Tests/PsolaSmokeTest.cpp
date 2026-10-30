@@ -48,12 +48,9 @@ double estimateFrequency(const std::vector<float>& samples, double sampleRate,
     return bestFrequency;
 }
 
-bool runCase(double sampleRate, double frequency, double semitones)
+bool runCase(double sampleRate, double frequency, double semitones, int frameSize)
 {
     constexpr int channels = 1;
-    // The upstream PSOLA implementation is designed for analysis frames
-    // around 50 ms; 256-sample host blocks are too short for its mark scheduler.
-    constexpr int frameSize = 2048;
     const int maxPeriod = static_cast<int>(std::ceil(sampleRate / 65.0));
     const int period = static_cast<int>(std::lround(sampleRate / frequency));
     const double expectedOutput = frequency * std::pow(2.0, semitones / 12.0);
@@ -95,7 +92,7 @@ bool runCase(double sampleRate, double frequency, double semitones)
     const double errorCents = measuredFrequency > 0.0
         ? 1200.0 * std::log2(measuredFrequency / expectedOutput) : 10000.0;
 
-    std::cout << "PSOLA input=" << frequency << " Hz, shift=" << semitones
+    std::cout << "PSOLA frame=" << frameSize << ", input=" << frequency << " Hz, shift=" << semitones
               << " st, expected=" << expectedOutput << " Hz, measured="
               << measuredFrequency << " Hz, error=" << errorCents << " cents"
               << std::endl;
@@ -143,14 +140,17 @@ int measureImpulsePeak()
 
 int main()
 {
-    const bool shiftedVoice = runCase(44100.0, 220.0, -5.0);
-    const bool unshiftedLowVoice = runCase(44100.0, 65.0, 0.0);
+    const bool shiftedVoice1024 = runCase(44100.0, 220.0, -5.0, 1024);
+    const bool shiftedVoice2048 = runCase(44100.0, 220.0, -5.0, 2048);
+    const bool shiftedVoice4096 = runCase(44100.0, 220.0, -5.0, 4096);
+    const bool unshiftedLowVoice = runCase(44100.0, 65.0, 0.0, 2048);
     const int impulsePeak = measureImpulsePeak();
 
-    if (!shiftedVoice || !unshiftedLowVoice || impulsePeak < 0)
+    if (!shiftedVoice1024 || !shiftedVoice2048 || !shiftedVoice4096 || !unshiftedLowVoice || impulsePeak < 0)
     {
         std::cerr << "PSOLA quality test failed: shiftedVoice=" << shiftedVoice
-                  << ", unshiftedLowVoice=" << unshiftedLowVoice
+                  << ", shifted1024=" << shiftedVoice1024 << ", shifted2048=" << shiftedVoice2048
+                  << ", shifted4096=" << shiftedVoice4096 << ", unshiftedLowVoice=" << unshiftedLowVoice
                   << ", impulsePeak=" << impulsePeak << std::endl;
         return 1;
     }
