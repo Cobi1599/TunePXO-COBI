@@ -162,11 +162,24 @@ float TunePXOCobiAudioProcessor::readDelay(int channel, float delaySamples) cons
     const float readPosition = (float)delayWritePosition - delaySamples;
     const float wrapped = readPosition < 0.0f ? readPosition + (float)delayBufferSize : readPosition;
     const int indexA = ((int)wrapped) % delayBufferSize;
-    const int indexB = (indexA + 1) % delayBufferSize;
     const float fraction = wrapped - std::floor(wrapped);
-    const float a = delayBuffers[(size_t)channel][(size_t)indexA];
-    const float b = delayBuffers[(size_t)channel][(size_t)indexB];
-    return a + (b - a) * fraction;
+    const auto& line = delayBuffers[(size_t)channel];
+    const int index0 = (indexA + delayBufferSize - 1) % delayBufferSize;
+    const int index1 = indexA;
+    const int index2 = (indexA + 1) % delayBufferSize;
+    const int index3 = (indexA + 2) % delayBufferSize;
+    const float y0 = line[(size_t)index0];
+    const float y1 = line[(size_t)index1];
+    const float y2 = line[(size_t)index2];
+    const float y3 = line[(size_t)index3];
+
+    // Cubic interpolation reduces the high-frequency loss and roughness
+    // caused by linear fractional-delay reads during continuous pitch bends.
+    const float c0 = y1;
+    const float c1 = 0.5f * (y2 - y0);
+    const float c2 = y0 - 2.5f * y1 + 2.0f * y2 - 0.5f * y3;
+    const float c3 = 0.5f * (y3 - y0) + 1.5f * (y1 - y2);
+    return ((c3 * fraction + c2) * fraction + c1) * fraction + c0;
 }
 
 float TunePXOCobiAudioProcessor::processPitchShift(int channel, float input, float ratio) noexcept
