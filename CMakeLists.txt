@@ -65,7 +65,8 @@ add_test(NAME PsolaSmokeTest COMMAND PsolaSmokeTest)
 
 
 # Exercise the complete AudioProcessor paths, including host-reported latency.
-add_executable(ProcessorIntegrationTest
+juce_add_console_app(ProcessorIntegrationTest PRODUCT_NAME "Processor Integration Test")
+target_sources(ProcessorIntegrationTest PRIVATE
     Tests/ProcessorIntegrationTest.cpp
     Source/PluginProcessor.cpp
     Source/PluginEditor.cpp
