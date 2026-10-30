@@ -1,5 +1,6 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
+#include "PsolaRealtimeAdapter.h"
 #include <cmath>
 
 namespace {
@@ -24,6 +25,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout TunePXOCobiAudioProcessor::c
     using Float = juce::AudioParameterFloat;
     using Choice = juce::AudioParameterChoice;
     juce::AudioProcessorValueTreeState::ParameterLayout layout;
+    layout.add(std::make_unique<Choice>("ENGINE", "Pitch Engine", juce::StringArray{ "Legacy", "PSOLA" }, 1));
     layout.add(std::make_unique<Choice>("MODE", "Tuning Style", juce::StringArray{ "Natural", "Hard Tune" }, 0));
     layout.add(std::make_unique<Choice>("KEY", "Key",
         juce::StringArray{ "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" }, 0));
@@ -41,6 +43,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout TunePXOCobiAudioProcessor::c
 void TunePXOCobiAudioProcessor::prepareToPlay(double sampleRate, int)
 {
     currentSampleRate = sampleRate > 0.0 ? sampleRate : 44100.0;
+    psola.prepare(currentSampleRate);
     for (auto& channel : delayBuffers)
         channel.fill(0.0f);
     pitchBuffer.fill(0.0f);
@@ -55,7 +58,7 @@ void TunePXOCobiAudioProcessor::prepareToPlay(double sampleRate, int)
     detectedFrequency.store(0.0f, std::memory_order_relaxed);
 }
 
-void TunePXOCobiAudioProcessor::releaseResources() {}
+void TunePXOCobiAudioProcessor::releaseResources() { psola.release(); }
 
 int TunePXOCobiAudioProcessor::quantiseMidiNote(float midiNote, int key, int scale) const noexcept
 {
@@ -216,6 +219,7 @@ void TunePXOCobiAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, j
     if (channels <= 0 || numSamples <= 0)
         return;
 
+    const int engine = (int)parameters.getRawParameterValue("ENGINE")->load();
     const int mode = (int)parameters.getRawParameterValue("MODE")->load();
     const int key = (int)parameters.getRawParameterValue("KEY")->load();
     const int scale = (int)parameters.getRawParameterValue("SCALE")->load();
@@ -299,6 +303,7 @@ void TunePXOCobiAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, j
         smoothedPitchRatio += (targetRatio - smoothedPitchRatio) * ratioSmoothing;
         const float ratio = smoothedPitchRatio;
 
+        if (engine == 0) {
         const float dryLeft = left[i];
         const float wetLeft = processPitchShift(0, dryLeft, ratio);
         left[i] = dryLeft + (wetLeft - dryLeft) * mix;
@@ -314,6 +319,11 @@ void TunePXOCobiAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, j
         if (shifterPhase >= 1.0f) shifterPhase -= 1.0f;
         if (shifterPhase < 0.0f) shifterPhase += 1.0f;
         delayWritePosition = (delayWritePosition + 1) % delayBufferSize;
+        }
+    }
+    if (engine == 1) {
+        const int period = PsolaRealtimeAdapter::periodFromFrequency(currentSampleRate, (double)detectedFrequency.load(std::memory_order_relaxed));
+        psola.process(buffer, period, (double)smoothedCorrectionSemitones);
     }
 }
 
