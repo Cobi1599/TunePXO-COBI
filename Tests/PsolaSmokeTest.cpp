@@ -620,6 +620,20 @@ bool testAbruptControlTransitions()
         }
 
         abruptProcessor.Process(abruptFrame, period, shifts[state]);
+        for (int transition : transitionFrames)
+        {
+            if (block >= transition - 2 && block <= transition + 4)
+            {
+                std::cout << "PSOLA mark timing block=" << block
+                          << ", requested-shift=" << shifts[state]
+                          << ", analysis-period=" << abruptProcessor.getAnalysisPeriod()
+                          << ", synthesis-period=" << abruptProcessor.getSynthesisPeriod()
+                          << ", analysis-mark-offset=" << abruptProcessor.getAnalysisMarkOffset()
+                          << ", synthesis-mark-offset=" << abruptProcessor.getSynthesisMarkOffset()
+                          << std::endl;
+                break;
+            }
+        }
         for (int sample = 0; sample < frameSize; ++sample)
         {
             allFinite = allFinite && std::isfinite(abruptSamples[sample]);
