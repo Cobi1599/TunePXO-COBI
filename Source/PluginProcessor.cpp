@@ -14,6 +14,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout TunePXOCobiAudioProcessor::c
     using Float = juce::AudioParameterFloat;
     using Choice = juce::AudioParameterChoice;
     juce::AudioProcessorValueTreeState::ParameterLayout layout;
+    layout.add(std::make_unique<Choice>("MODE", "Tuning Style", juce::StringArray{ "Natural", "Hard Tune" }, 0));
     layout.add(std::make_unique<Choice>("KEY", "Key",
         juce::StringArray{ "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" }, 0));
     layout.add(std::make_unique<Choice>("SCALE", "Scale",
