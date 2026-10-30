@@ -11,8 +11,8 @@ double estimateFrequency(const std::vector<float>& samples, double sampleRate,
                          double expectedFrequency)
 {
     const int expectedLag = static_cast<int>(std::lround(sampleRate / expectedFrequency));
-    const int minLag = std::max(2, static_cast<int>(std::floor(expectedLag * 0.85)));
-    const int maxLag = static_cast<int>(std::ceil(expectedLag * 1.15));
+    const int minLag = std::max(2, static_cast<int>(std::floor(expectedLag * 0.50)));
+    const int maxLag = static_cast<int>(std::ceil(expectedLag * 1.50));
     const size_t usable = samples.size() - static_cast<size_t>(maxLag);
     double bestScore = -1.0;
     int bestLag = 0;
