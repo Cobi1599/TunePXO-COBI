@@ -434,7 +434,7 @@ bool testFastPitchGlide()
               << " cents, finite=" << allFinite << std::endl;
     return allFinite && energy / settledSegment.size() > 1.0e-6
         && std::abs(errorCents) <= 35.0
-        && trackingMeasured > 0.0 && std::abs(trackingErrorCents) <= 90.0;
+        && trackingMeasured > 0.0 && std::abs(trackingErrorCents) <= 35.0;
 }
 
 bool testStereoPsola()
