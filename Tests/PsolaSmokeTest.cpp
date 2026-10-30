@@ -104,7 +104,9 @@ bool runCase(double sampleRate, double frequency, double semitones, int frameSiz
 int measureImpulsePeak()
 {
     constexpr int channels = 1;
-    constexpr int frameSize = 256;
+    // Match the candidate real-time adapter frame size. This measurement
+    // is only an impulse-peak observation, not a host-reported latency value.
+    constexpr int frameSize = 1024;
     constexpr int maxPeriod = 679;
     constexpr int totalFrames = 300;
     TD_pitch_shift::Sola processor(channels, frameSize, maxPeriod);
