@@ -47,3 +47,18 @@ target_link_libraries(TunePXO_COBI PRIVATE
     juce::juce_recommended_lto_flags
     juce::juce_recommended_warning_flags
 )
+
+# Exercise the PSOLA processor with synthetic voiced signals in CI.
+enable_testing()
+add_executable(PsolaSmokeTest
+    Tests/PsolaSmokeTest.cpp
+    ThirdParty/psola/sola.cpp
+)
+target_include_directories(PsolaSmokeTest PRIVATE ThirdParty/psola)
+target_compile_features(PsolaSmokeTest PRIVATE cxx_std_17)
+target_link_libraries(PsolaSmokeTest PRIVATE
+    juce::juce_audio_basics
+    juce::juce_recommended_config_flags
+    juce::juce_recommended_warning_flags
+)
+add_test(NAME PsolaSmokeTest COMMAND PsolaSmokeTest)
