@@ -1,6 +1,7 @@
 #include "sola.h"
 
-#include <algorithm>\n#include <array>
+#include <algorithm>
+#include <array>
 #include <cmath>
 #include <iostream>
 #include <vector>
@@ -273,7 +274,8 @@ int main()
     const bool shiftedVoice2048 = runCase(44100.0, 220.0, -5.0, 2048);
     const bool shiftedVoice4096 = runCase(44100.0, 220.0, -5.0, 4096);
     const bool unshiftedLowVoice = runCase(44100.0, 65.0, 0.0, 2048);
-    const int impulsePeak = measureImpulsePeak();\n    const bool variableBlocks = testVariableHostBlocks();
+    const int impulsePeak = measureImpulsePeak();
+    const bool variableBlocks = testVariableHostBlocks();
 
     if (!shiftedVoice1024 || !shiftedVoice2048 || !shiftedVoice4096 || !unshiftedLowVoice || impulsePeak < 0 || !variableBlocks)
     {
