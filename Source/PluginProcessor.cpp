@@ -268,13 +268,11 @@ void TunePXOCobiAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, j
             // Ignore very short unvoiced/detection gaps instead of abruptly
             // pulling the correction back to unity in the middle of a note.
             samplesSinceValidPitch += 1;
-            constexpr int dropoutHoldSamples = (int)(0.045 * 44100.0);
             const int holdSamples = (int)(0.045 * currentSampleRate);
             if (samplesSinceValidPitch <= holdSamples)
                 targetRatio = heldTargetPitchRatio;
             else
                 smoothedMidiNote = -1.0f;
-            juce::ignoreUnused(dropoutHoldSamples);
         }
 
         // Smooth ratio changes, including brief detector dropouts, to suppress tiny RF-like ticks.
