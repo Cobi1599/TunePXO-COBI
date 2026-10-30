@@ -672,8 +672,12 @@ bool testProductionAdapterFastGlide()
     }
     const double measured = estimateFrequency(captured, sampleRate, 280.0);
     const double errorCents = 1200.0 * std::log2(measured / 280.0);
+    // Compare the output window with the input time that produced it.
+    // The adapter FIFO is 1024 samples, but the complete production path
+    // (PSOLA engine plus FIFO) measures 2502 samples at 48 kHz.
+    constexpr int measuredProductionLatency = 2502;
     const double glideMidpointInput = 180.0 + 100.0
-        * (static_cast<double>(glideSamples - glideWindowSamples / 2 - adapter.getLatencySamples())
+        * (static_cast<double>(glideSamples - glideWindowSamples / 2 - measuredProductionLatency)
            / static_cast<double>(glideSamples));
     const double glideMeasured = estimateFrequency(glideTail, sampleRate, glideMidpointInput);
     const double glideErrorCents = 1200.0 * std::log2(glideMeasured / glideMidpointInput);
