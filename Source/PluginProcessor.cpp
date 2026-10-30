@@ -44,6 +44,21 @@ void TunePXOCobiAudioProcessor::prepareToPlay(double sampleRate, int)
 {
     currentSampleRate = sampleRate > 0.0 ? sampleRate : 44100.0;
     psola.prepare(currentSampleRate);
+    for (auto& channel : psolaDryRing) channel.fill(0.0f);
+    dryWritePosition = 0;
+    lastPsolaPeriod = 0;
+    // Impulse-peak alignment estimates measured in the production adapter.
+    const double rates[] = { 44100.0, 48000.0, 96000.0 };
+    const double delays[] = { 2382.0, 2502.0, 3978.0 };
+    if (currentSampleRate <= rates[0]) psolaLatencySamples = (int)delays[0];
+    else if (currentSampleRate <= rates[1]) {
+        const double t = (currentSampleRate - rates[0]) / (rates[1] - rates[0]);
+        psolaLatencySamples = (int)std::lround(delays[0] + t * (delays[1] - delays[0]));
+    } else if (currentSampleRate <= rates[2]) {
+        const double t = (currentSampleRate - rates[1]) / (rates[2] - rates[1]);
+        psolaLatencySamples = (int)std::lround(delays[1] + t * (delays[2] - delays[1]));
+    } else psolaLatencySamples = (int)std::lround(delays[2] * currentSampleRate / rates[2]);
+    setLatencySamples(psolaLatencySamples);
     for (auto& channel : delayBuffers)
         channel.fill(0.0f);
     pitchBuffer.fill(0.0f);
@@ -220,6 +235,7 @@ void TunePXOCobiAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, j
         return;
 
     const int engine = (int)parameters.getRawParameterValue("ENGINE")->load();
+    const int dryBlockStart = dryWritePosition;
     const int mode = (int)parameters.getRawParameterValue("MODE")->load();
     const int key = (int)parameters.getRawParameterValue("KEY")->load();
     const int scale = (int)parameters.getRawParameterValue("SCALE")->load();
@@ -243,6 +259,11 @@ void TunePXOCobiAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, j
 
     for (int i = 0; i < numSamples; ++i)
     {
+        if (engine == 1) {
+            psolaDryRing[0][(size_t)dryWritePosition] = left[i];
+            psolaDryRing[1][(size_t)dryWritePosition] = right != nullptr ? right[i] : left[i];
+            dryWritePosition = (dryWritePosition + 1) % dryRingSize;
+        }
         const float mono = channels > 1 ? 0.5f * (left[i] + right[i]) : left[i];
 
         if ((audioSampleCounter++ % analysisDecimation) == 0)
@@ -322,8 +343,22 @@ void TunePXOCobiAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, j
         }
     }
     if (engine == 1) {
-        const int period = PsolaRealtimeAdapter::periodFromFrequency(currentSampleRate, (double)detectedFrequency.load(std::memory_order_relaxed));
-        psola.process(buffer, period, (double)smoothedCorrectionSemitones);
+        const int measuredPeriod = PsolaRealtimeAdapter::periodFromFrequency(
+            currentSampleRate, (double)detectedFrequency.load(std::memory_order_relaxed));
+        if (measuredPeriod > 0) lastPsolaPeriod = measuredPeriod;
+        psola.process(buffer, lastPsolaPeriod, (double)smoothedCorrectionSemitones);
+        if (mix < 0.9999f) {
+            for (int i = 0; i < numSamples; ++i) {
+                int read = (dryBlockStart + i - psolaLatencySamples) % dryRingSize;
+                if (read < 0) read += dryRingSize;
+                const float dryL = psolaDryRing[0][(size_t)read];
+                left[i] = dryL + (left[i] - dryL) * mix;
+                if (right != nullptr) {
+                    const float dryR = psolaDryRing[1][(size_t)read];
+                    right[i] = dryR + (right[i] - dryR) * mix;
+                }
+            }
+        }
     }
 }
 
