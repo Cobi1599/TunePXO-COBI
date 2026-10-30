@@ -489,6 +489,11 @@ int main()
     const bool shiftedVoice2048 = runCase(44100.0, 220.0, -5.0, 2048);
     const bool shiftedVoice4096 = runCase(44100.0, 220.0, -5.0, 4096);
     const bool unshiftedLowVoice = runCase(44100.0, 65.0, 0.0, 2048);
+    // Broader pitch-accuracy matrix: low/mid/high registers and both shift directions.
+    const bool lowVoiceDown = runCase(44100.0, 110.0, -5.0, 1024);
+    const bool midVoiceUp = runCase(44100.0, 220.0, 5.0, 1024);
+    const bool highVoiceDown = runCase(44100.0, 330.0, -7.0, 1024);
+    const bool highVoiceUp = runCase(44100.0, 440.0, 3.0, 1024);
     const int impulsePeak = measureImpulsePeak();
     bool adapterImpulseTests = true;
     for (double rate : { 44100.0, 48000.0, 96000.0 })
@@ -500,7 +505,9 @@ int main()
     const bool variableBlocks = testVariableHostBlocks();
     const bool productionAdapter = testProductionAdapter();
 
-    if (!shiftedVoice1024 || !shiftedVoice2048 || !shiftedVoice4096 || !unshiftedLowVoice || impulsePeak < 0 || !adapterImpulseTests || !stereoPsola || !variableBlocks || !productionAdapter)
+    if (!shiftedVoice1024 || !shiftedVoice2048 || !shiftedVoice4096 || !unshiftedLowVoice
+        || !lowVoiceDown || !midVoiceUp || !highVoiceDown || !highVoiceUp
+        || impulsePeak < 0 || !adapterImpulseTests || !stereoPsola || !variableBlocks || !productionAdapter)
     {
         std::cerr << "PSOLA quality test failed: shifted2048=" << shiftedVoice2048
                   << ", shifted1024=" << shiftedVoice1024 << ", shifted2048=" << shiftedVoice2048
