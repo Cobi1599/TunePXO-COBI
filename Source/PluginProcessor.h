@@ -1,5 +1,7 @@
 #pragma once
 #include <JuceHeader.h>
+#include <array>
+#include <atomic>
 
 class TunePXOCobiAudioProcessor final : public juce::AudioProcessor
 {
@@ -18,7 +20,7 @@ public:
     bool acceptsMidi() const override { return false; }
     bool producesMidi() const override { return false; }
     bool isMidiEffect() const override { return false; }
-    double getTailLengthSeconds() const override { return 0.0; }
+    double getTailLengthSeconds() const override { return 0.03; }
 
     int getNumPrograms() override { return 1; }
     int getCurrentProgram() override { return 0; }
@@ -30,8 +32,28 @@ public:
     void setStateInformation(const void*, int) override;
 
     juce::AudioProcessorValueTreeState parameters;
+    int getDetectedMidiNote() const noexcept { return detectedMidiNote.load(std::memory_order_relaxed); }
+    float getDetectedFrequency() const noexcept { return detectedFrequency.load(std::memory_order_relaxed); }
 
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
+    void analysePitch() noexcept;
+    float readDelay(int channel, float delaySamples) const noexcept;
+    float processPitchShift(int channel, float input, float ratio) noexcept;
+    int quantiseMidiNote(float midiNote, int key, int scale) const noexcept;
+
+    static constexpr int pitchWindowSize = 512;
+    static constexpr int delayBufferSize = 2048;
+    std::array<float, pitchWindowSize> pitchBuffer {};
+    int pitchWritePosition = 0;
+    int samplesSinceAnalysis = 0;
+    std::array<std::array<float, delayBufferSize>, 2> delayBuffers {};
+    int delayWritePosition = 0;
+    float shifterPhase = 0.0f;
+    float smoothedMidiNote = -1.0f;
+    double currentSampleRate = 44100.0;
+    std::atomic<int> detectedMidiNote { -1 };
+    std::atomic<float> detectedFrequency { 0.0f };
+
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(TunePXOCobiAudioProcessor)
 };
