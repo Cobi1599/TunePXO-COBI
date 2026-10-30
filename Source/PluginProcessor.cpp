@@ -5,7 +5,7 @@
 namespace {
 constexpr float twoPi = juce::MathConstants<float>::twoPi;
 constexpr int analysisDecimation = 2;
-constexpr int minPitchLag = 24;
+constexpr int minPitchLag = 12;
 constexpr int maxPitchLag = 300;
 constexpr float minimumCorrelation = 0.62f;
 }
@@ -60,14 +60,14 @@ int TunePXOCobiAudioProcessor::quantiseMidiNote(float midiNote, int key, int sca
     if (scale == 2) return nearest;
     const bool* allowed = scale == 1 ? minor : major;
     int best = nearest;
-    int bestDistance = 99;
+    float bestDistance = 1000.0f;
     for (int offset = -6; offset <= 6; ++offset) {
         const int candidate = nearest + offset;
         int pitchClass = (candidate - key) % 12;
         if (pitchClass < 0) pitchClass += 12;
         if (allowed[pitchClass] && std::abs(candidate - midiNote) < (float)bestDistance) {
             best = candidate;
-            bestDistance = std::abs(candidate - midiNote);
+            bestDistance = std::abs((float)candidate - midiNote);
         }
     }
     return best;
@@ -161,13 +161,8 @@ float TunePXOCobiAudioProcessor::processPitchShift(int channel, float input, flo
     const float weightB = 1.0f - weightA;
     const float shifted = readDelay(channel, delayA) * weightA + readDelay(channel, delayB) * weightB;
 
-    if (channel == 0) {
-        shifterPhase += phaseStep;
-        if (shifterPhase >= 1.0f) shifterPhase -= 1.0f;
-        if (shifterPhase < 0.0f) shifterPhase += 1.0f;
-        delayWritePosition = (delayWritePosition + 1) % delayBufferSize;
-    }
-    return shifted;
+    juce::ignoreUnused(phaseStep);
+    return std::abs(ratio - 1.0f) < 0.0005f ? input : shifted;
 }
 
 void TunePXOCobiAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer&)
@@ -218,18 +213,19 @@ void TunePXOCobiAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, j
                 const float wet = processPitchShift(ch, dry, ratio);
                 buffer.getWritePointer(ch)[i] = dry + (wet - dry) * mix;
             }
+            shifterPhase += (1.0f - ratio) / 256.0f;
+            if (shifterPhase >= 1.0f) shifterPhase -= 1.0f;
+            if (shifterPhase < 0.0f) shifterPhase += 1.0f;
+            delayWritePosition = (delayWritePosition + 1) % delayBufferSize;
         }
     } else {
         smoothedMidiNote = -1.0f;
-        for (int ch = 0; ch < channels; ++ch) {
-            auto* data = buffer.getWritePointer(ch);
-            for (int i = 0; i < numSamples; ++i)
-                processPitchShift(ch, data[i], 1.0f);
+        for (int i = 0; i < numSamples; ++i) {
+            for (int ch = 0; ch < channels; ++ch)
+                processPitchShift(ch, buffer.getReadPointer(ch)[i], 1.0f);
+            delayWritePosition = (delayWritePosition + 1) % delayBufferSize;
         }
     }
-
-    // Keep the delay-line write head moving once per sample, including mono layouts.
-    if (channels == 0) delayWritePosition = (delayWritePosition + numSamples) % delayBufferSize;
 }
 
 juce::AudioProcessorEditor* TunePXOCobiAudioProcessor::createEditor()
