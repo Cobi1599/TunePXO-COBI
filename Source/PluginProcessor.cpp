@@ -42,6 +42,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout TunePXOCobiAudioProcessor::c
 
 void TunePXOCobiAudioProcessor::prepareToPlay(double sampleRate, int)
 {
+    psolaScratch.setSize(2, 131072, false, true, false);
     currentSampleRate = sampleRate > 0.0 ? sampleRate : 44100.0;
     psola.prepare(currentSampleRate);
     for (auto& channel : psolaDryRing) channel.fill(0.0f);
@@ -355,23 +356,44 @@ void TunePXOCobiAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, j
         }
         legacyLatencyWritePosition = (legacyLatencyWritePosition + 1) % dryRingSize;
     }
-    if (engine == 1) {
+    // Feed PSOLA the original input on every block, even while Legacy is
+    // selected. Its internal overlap/FIFO state therefore stays current.
+    // Scratch storage is allocated in prepareToPlay, not on the audio thread.
+    const int scratchCapacity = psolaScratch.getNumSamples();
+    int offset = 0;
+    while (offset < numSamples) {
+        const int chunk = juce::jmin(scratchCapacity, numSamples - offset);
+        for (int i = 0; i < chunk; ++i) {
+            int read = (dryBlockStart + offset + i) % dryRingSize;
+            psolaScratch.setSample(0, i, psolaDryRing[0][(size_t)read]);
+            psolaScratch.setSample(1, i, psolaDryRing[1][(size_t)read]);
+        }
+        juce::AudioBuffer<float> psolaBlock(
+            psolaScratch.getArrayOfWritePointers(), 2, chunk);
         const int measuredPeriod = PsolaRealtimeAdapter::periodFromFrequency(
             currentSampleRate, (double)detectedFrequency.load(std::memory_order_relaxed));
         if (measuredPeriod > 0) lastPsolaPeriod = measuredPeriod;
-        psola.process(buffer, lastPsolaPeriod, (double)smoothedCorrectionSemitones);
-        if (mix < 0.9999f) {
-            for (int i = 0; i < numSamples; ++i) {
-                int read = (dryBlockStart + i - psolaLatencySamples) % dryRingSize;
-                if (read < 0) read += dryRingSize;
-                const float dryL = psolaDryRing[0][(size_t)read];
-                left[i] = dryL + (left[i] - dryL) * mix;
-                if (right != nullptr) {
-                    const float dryR = psolaDryRing[1][(size_t)read];
-                    right[i] = dryR + (right[i] - dryR) * mix;
+        psola.process(psolaBlock, lastPsolaPeriod, (double)smoothedCorrectionSemitones);
+
+        if (engine == 1) {
+            for (int i = 0; i < chunk; ++i) {
+                const int source = offset + i;
+                const float wetL = psolaScratch.getSample(0, i);
+                left[source] = wetL;
+                if (right != nullptr) right[source] = psolaScratch.getSample(1, i);
+                if (mix < 0.9999f) {
+                    int read = (dryBlockStart + source - psolaLatencySamples) % dryRingSize;
+                    if (read < 0) read += dryRingSize;
+                    const float dryL = psolaDryRing[0][(size_t)read];
+                    left[source] = dryL + (left[source] - dryL) * mix;
+                    if (right != nullptr) {
+                        const float dryR = psolaDryRing[1][(size_t)read];
+                        right[source] = dryR + (right[source] - dryR) * mix;
+                    }
                 }
             }
         }
+        offset += chunk;
     }
 }
 
