@@ -204,7 +204,7 @@ bool testVariableHostBlocks()
 
     while (total < 65536)
     {
-        const int count = std::min(blockSizes[block++ % std::size(blockSizes)], 65536 - total);
+        const int count = std::min(blockSizes[block++ % (sizeof(blockSizes) / sizeof(blockSizes[0]))], 65536 - total);
         for (int i = 0; i < count; ++i)
         {
             input[static_cast<size_t>(i)] = 0.5f * static_cast<float>(std::sin(phase));
