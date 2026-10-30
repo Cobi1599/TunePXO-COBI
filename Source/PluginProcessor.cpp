@@ -46,7 +46,7 @@ void TunePXOCobiAudioProcessor::prepareToPlay(double sampleRate, int)
     psola.prepare(currentSampleRate);
     for (auto& channel : psolaDryRing) channel.fill(0.0f);
     dryWritePosition = 0;
-    lastPsolaPeriod = 0;
+    lastPsolaPeriod = PsolaRealtimeAdapter::periodFromFrequency(currentSampleRate, 220.0);
     // Impulse-peak alignment estimates measured in the production adapter.
     const double rates[] = { 44100.0, 48000.0, 96000.0 };
     const double delays[] = { 2382.0, 2502.0, 3978.0 };
