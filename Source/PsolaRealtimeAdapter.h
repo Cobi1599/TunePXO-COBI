@@ -112,7 +112,8 @@ private:
         outputRing[static_cast<size_t>(channel)][static_cast<size_t>(writeOutput)] = value;
         if (channel == maxChannels - 1)
             writeOutput = (writeOutput + 1) % ringSize;
-        ++outputCount;
+        if (channel == maxChannels - 1)
+            ++outputCount;
     }
 
     float popOutput(int channel) noexcept
