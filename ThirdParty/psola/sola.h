@@ -21,6 +21,10 @@ public:
     Sola& operator=(const Sola&&) = delete;
     
     inline int getFrameSize() const noexcept;
+    int getAnalysisPeriod() const noexcept { return mAnalysis.lastPeriod; }
+    int getSynthesisPeriod() const noexcept { return mSynthesis.lastPeriod; }
+    int getAnalysisMarkOffset() const noexcept { return mAnalysis.lastMarkOffset; }
+    int getSynthesisMarkOffset() const noexcept { return mSynthesis.lastMarkOffset; }
     void Process(juce::AudioBuffer<float>& frame, int currentFramePeriod, double semitones);
 private:
     struct CircularBuffer {
