@@ -294,7 +294,9 @@ bool testPitchGlide()
     TD_pitch_shift::Sola processor(1, frameSize, maxPeriod);
     juce::AudioBuffer<float> frame(1, frameSize);
     std::vector<float> settledSegment;
+    std::vector<float> trackingSegment;
     settledSegment.reserve(settleFrames * frameSize);
+    trackingSegment.reserve(32 * frameSize);
     double phase = 0.0;
     bool allFinite = true;
 
@@ -324,11 +326,20 @@ bool testPitchGlide()
             allFinite = allFinite && std::isfinite(samples[i]);
             if (block >= glideFrames)
                 settledSegment.push_back(samples[i]);
+            else if (block >= glideFrames - 32)
+                trackingSegment.push_back(samples[i]);
         }
     }
 
     const double expected = endFrequency * std::pow(2.0, shiftSemitones / 12.0);
     const double measured = estimateFrequency(settledSegment, sampleRate, expected);
+    const double trackingExpectedInput = startFrequency
+        + (endFrequency - startFrequency)
+            * (static_cast<double>(glideFrames - 16) / static_cast<double>(glideFrames - 1));
+    const double trackingExpected = trackingExpectedInput * std::pow(2.0, shiftSemitones / 12.0);
+    const double trackingMeasured = estimateFrequency(trackingSegment, sampleRate, trackingExpected);
+    const double trackingErrorCents = trackingMeasured > 0.0
+        ? 1200.0 * std::log2(trackingMeasured / trackingExpected) : 10000.0;
     const double errorCents = measured > 0.0
         ? 1200.0 * std::log2(measured / expected) : 10000.0;
     double energy = 0.0;
@@ -338,9 +349,13 @@ bool testPitchGlide()
     std::cout << "PSOLA glide " << startFrequency << "->" << endFrequency
               << " Hz then hold, expected=" << expected << " Hz, measured="
               << measured << " Hz, error=" << errorCents
+              << " cents; glide-tail expected=" << trackingExpected
+              << " Hz, measured=" << trackingMeasured
+              << " Hz, error=" << trackingErrorCents
               << " cents, finite=" << allFinite << std::endl;
     return allFinite && energy / settledSegment.size() > 1.0e-6
-        && std::abs(errorCents) <= 35.0;
+        && std::abs(errorCents) <= 35.0
+        && trackingMeasured > 0.0 && std::abs(trackingErrorCents) <= 65.0;
 }
 
 bool testStereoPsola()
