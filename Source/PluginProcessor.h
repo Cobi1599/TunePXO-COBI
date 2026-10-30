@@ -45,6 +45,11 @@ private:
 
     static constexpr int pitchWindowSize = 512;
     PsolaRealtimeAdapter psola;
+    static constexpr int dryRingSize = 16384;
+    std::array<std::array<float, dryRingSize>, 2> psolaDryRing {};
+    int dryWritePosition = 0;
+    int psolaLatencySamples = 2502;
+    int lastPsolaPeriod = 0;
     static constexpr int delayBufferSize = 2048;
     std::array<float, pitchWindowSize> pitchBuffer {};
     int pitchWritePosition = 0;
