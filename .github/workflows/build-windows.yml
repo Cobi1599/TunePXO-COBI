@@ -6,7 +6,7 @@ on:
     branches: [ main, 'experiment/signalsmith-pitch-engine', 'experiment/psola-engine' ]
     paths:
       - 'CMakeLists.txt'
-      - 'Source/**'
+      - 'Source/**', 'Tests/**', 'ThirdParty/**'
       - '.github/workflows/build-windows.yml'
 
 jobs:
@@ -22,7 +22,7 @@ jobs:
       - name: Build VST3 and Standalone
         run: cmake --build build --config Release --target TunePXO_COBI_VST3 TunePXO_COBI_Standalone
 
-      - name: Upload plugin builds
+      - name: Build PSOLA smoke test\n        run: cmake --build build --config Release --target PsolaSmokeTest\n\n      - name: Run PSOLA smoke test\n        run: ctest --test-dir build -C Release --output-on-failure\n\n      - name: Upload plugin builds
         uses: actions/upload-artifact@v4
         with:
           name: TunePXO-COBI-Windows-VST3
