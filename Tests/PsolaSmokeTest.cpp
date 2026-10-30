@@ -408,13 +408,13 @@ bool testProductionAdapter()
         && std::abs(errorLeft) <= 35.0 && std::abs(errorRight) <= 35.0;
 }
 
-int measureProductionAdapterImpulsePeak()
+int measureProductionAdapterImpulsePeak(double sampleRate, double shift)
 {
-    constexpr double sampleRate = 48000.0;
     constexpr int totalSamples = 65536;
     constexpr int blockSize = 256;
     PsolaRealtimeAdapter adapter;
     adapter.prepare(sampleRate);
+    const int period = PsolaRealtimeAdapter::periodFromFrequency(sampleRate, 220.0);
     juce::AudioBuffer<float> storage(2, blockSize);
     int peakIndex = -1;
     float peak = 0.0f;
@@ -426,7 +426,7 @@ int measureProductionAdapterImpulsePeak()
         if (globalIndex == 0)
             storage.setSample(0, 0, 1.0f);
         juce::AudioBuffer<float> hostBlock(storage.getArrayOfWritePointers(), 2, count);
-        adapter.process(hostBlock, 218, -5.0);
+        adapter.process(hostBlock, period, shift);
         for (int i = 0; i < count; ++i)
         {
             const float value = std::abs(hostBlock.getSample(0, i));
@@ -438,8 +438,9 @@ int measureProductionAdapterImpulsePeak()
         }
         globalIndex += count;
     }
-    std::cout << "Production adapter impulse peak index=" << peakIndex
-              << " at 48 kHz, peak=" << peak << std::endl;
+    std::cout << "Production adapter impulse peak=" << peakIndex
+              << " samples at " << sampleRate << " Hz, shift="
+              << shift << " st, peak=" << peak << std::endl;
     return peakIndex;
 }
 
@@ -489,17 +490,21 @@ int main()
     const bool shiftedVoice4096 = runCase(44100.0, 220.0, -5.0, 4096);
     const bool unshiftedLowVoice = runCase(44100.0, 65.0, 0.0, 2048);
     const int impulsePeak = measureImpulsePeak();
-    const int adapterImpulsePeak = measureProductionAdapterImpulsePeak();
+    bool adapterImpulseTests = true;
+    for (double rate : { 44100.0, 48000.0, 96000.0 })
+        for (double shift : { -5.0, 0.0, 5.0 })
+            adapterImpulseTests = (measureProductionAdapterImpulsePeak(rate, shift) > 0)
+                               && adapterImpulseTests;
     const bool stereoPsola = testStereoPsola();
     const bool variableBlocks = testVariableHostBlocks();
     const bool productionAdapter = testProductionAdapter();
 
-    if (!shiftedVoice1024 || !shiftedVoice2048 || !shiftedVoice4096 || !unshiftedLowVoice || impulsePeak < 0 || adapterImpulsePeak < 0 || !stereoPsola || !variableBlocks || !productionAdapter)
+    if (!shiftedVoice1024 || !shiftedVoice2048 || !shiftedVoice4096 || !unshiftedLowVoice || impulsePeak < 0 || !adapterImpulseTests || !stereoPsola || !variableBlocks || !productionAdapter)
     {
         std::cerr << "PSOLA quality test failed: shifted2048=" << shiftedVoice2048
                   << ", shifted1024=" << shiftedVoice1024 << ", shifted2048=" << shiftedVoice2048
                   << ", shifted4096=" << shiftedVoice4096 << ", unshiftedLowVoice=" << unshiftedLowVoice
-                  << ", impulsePeak=" << impulsePeak << ", adapterImpulsePeak=" << adapterImpulsePeak << ", stereoPsola=" << stereoPsola
+                  << ", impulsePeak=" << impulsePeak << ", adapterImpulseTests=" << adapterImpulseTests << ", stereoPsola=" << stereoPsola
                   << ", variableBlocks=" << variableBlocks << ", productionAdapter=" << productionAdapter << std::endl;
         return 1;
     }
