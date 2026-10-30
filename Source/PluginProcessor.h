@@ -50,6 +50,8 @@ private:
     int dryWritePosition = 0;
     int psolaLatencySamples = 2502;
     int lastPsolaPeriod = 0;
+    std::array<std::array<float, dryRingSize>, 2> legacyLatencyRing {};
+    int legacyLatencyWritePosition = 0;
     static constexpr int delayBufferSize = 2048;
     std::array<float, pitchWindowSize> pitchBuffer {};
     int pitchWritePosition = 0;
