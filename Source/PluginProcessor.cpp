@@ -260,6 +260,15 @@ void TunePXOCobiAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, j
     auto* left = buffer.getWritePointer(0);
     auto* right = channels > 1 ? buffer.getWritePointer(1) : nullptr;
 
+    // Preserve untouched input for PSOLA before Legacy writes to the host buffer.
+    const int scratchCapacity = psolaScratch.getNumSamples();
+    const bool canProcessPsolaBlock = numSamples <= scratchCapacity;
+    if (canProcessPsolaBlock) {
+        psolaScratch.copyFrom(0, 0, left, numSamples);
+        if (right != nullptr) psolaScratch.copyFrom(1, 0, right, numSamples);
+        else psolaScratch.copyFrom(1, 0, left, numSamples);
+    }
+
     for (int i = 0; i < numSamples; ++i)
     {
         // Keep the dry history warm regardless of the selected engine so
@@ -356,47 +365,34 @@ void TunePXOCobiAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, j
         }
         legacyLatencyWritePosition = (legacyLatencyWritePosition + 1) % dryRingSize;
     }
-    // Feed PSOLA the original input on every block, even while Legacy is
-    // selected. Its internal overlap/FIFO state therefore stays current.
-    // Scratch storage is allocated in prepareToPlay, not on the audio thread.
-    const int scratchCapacity = psolaScratch.getNumSamples();
-    int offset = 0;
-    while (offset < numSamples) {
-        const int chunk = juce::jmin(scratchCapacity, numSamples - offset);
-        for (int i = 0; i < chunk; ++i) {
-            int read = (dryBlockStart + offset + i) % dryRingSize;
-            psolaScratch.setSample(0, i, psolaDryRing[0][(size_t)read]);
-            psolaScratch.setSample(1, i, psolaDryRing[1][(size_t)read]);
-        }
+    // Keep PSOLA's overlap/FIFO state warm using the untouched input snapshot.
+    // Oversized host blocks remain on Legacy rather than replaying wrapped ring data.
+    if (canProcessPsolaBlock) {
         juce::AudioBuffer<float> psolaBlock(
-            psolaScratch.getArrayOfWritePointers(), 2, chunk);
+            psolaScratch.getArrayOfWritePointers(), 2, numSamples);
         const int measuredPeriod = PsolaRealtimeAdapter::periodFromFrequency(
             currentSampleRate, (double)detectedFrequency.load(std::memory_order_relaxed));
         if (measuredPeriod > 0) lastPsolaPeriod = measuredPeriod;
         psola.process(psolaBlock, lastPsolaPeriod, (double)smoothedCorrectionSemitones);
 
         if (engine == 1) {
-            for (int i = 0; i < chunk; ++i) {
-                const int source = offset + i;
-                const float wetL = psolaScratch.getSample(0, i);
-                left[source] = wetL;
-                if (right != nullptr) right[source] = psolaScratch.getSample(1, i);
+            for (int i = 0; i < numSamples; ++i) {
+                left[i] = psolaScratch.getSample(0, i);
+                if (right != nullptr) right[i] = psolaScratch.getSample(1, i);
                 if (mix < 0.9999f) {
-                    int read = (dryBlockStart + source - psolaLatencySamples) % dryRingSize;
+                    int read = (dryBlockStart + i - psolaLatencySamples) % dryRingSize;
                     if (read < 0) read += dryRingSize;
                     const float dryL = psolaDryRing[0][(size_t)read];
-                    left[source] = dryL + (left[source] - dryL) * mix;
+                    left[i] = dryL + (left[i] - dryL) * mix;
                     if (right != nullptr) {
                         const float dryR = psolaDryRing[1][(size_t)read];
-                        right[source] = dryR + (right[source] - dryR) * mix;
+                        right[i] = dryR + (right[i] - dryR) * mix;
                     }
                 }
             }
         }
-        offset += chunk;
     }
 }
-
 juce::AudioProcessorEditor* TunePXOCobiAudioProcessor::createEditor()
 {
     return new TunePXOCobiAudioProcessorEditor(*this);
