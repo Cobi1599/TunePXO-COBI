@@ -53,6 +53,7 @@ private:
     int delayWritePosition = 0;
     float shifterPhase = 0.0f;
     float smoothedMidiNote = -1.0f;
+    float smoothedCorrectionSemitones = 0.0f;
     float smoothedPitchRatio = 1.0f;
     float heldTargetPitchRatio = 1.0f;
     int samplesSinceValidPitch = 0;
