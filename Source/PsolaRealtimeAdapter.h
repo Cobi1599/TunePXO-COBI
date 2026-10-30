@@ -51,7 +51,7 @@ public:
     }
 
     // period is measured in samples at the plugin's full sample rate.
-    // semitones follows Sola's convention: negative values raise pitch.
+    // semitones follows the tested convention: negative values lower pitch.
     void process(juce::AudioBuffer<float>& buffer, int period,
                  double semitones) noexcept
     {
