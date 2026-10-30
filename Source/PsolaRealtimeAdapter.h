@@ -95,6 +95,8 @@ public:
                     static_cast<int>(std::lround(1.0 / averageFrequency)));
                 const double frameShift = semitoneSum
                     / static_cast<double>(parameterSampleCount);
+                lastProcessedPeriod = framePeriod;
+                lastProcessedSemitones = frameShift;
                 processor->Process(frame, framePeriod, frameShift);
                 periodFrequencySum = 0.0;
                 semitoneSum = 0.0;
@@ -112,6 +114,8 @@ public:
     int getLatencySamples() const noexcept { return frameSize; }
     int getUnderflows() const noexcept { return underflows; }
     int getOverflows() const noexcept { return overflows; }
+    int getLastProcessedPeriod() const noexcept { return lastProcessedPeriod; }
+    double getLastProcessedSemitones() const noexcept { return lastProcessedSemitones; }
 
     static int periodFromFrequency(double sampleRate, double frequency) noexcept
     {
@@ -160,6 +164,8 @@ private:
     double periodFrequencySum = 0.0;
     double semitoneSum = 0.0;
     int parameterSampleCount = 0;
+    int lastProcessedPeriod = 0;
+    double lastProcessedSemitones = 0.0;
     int readOutput = 0, writeOutput = 0, outputCount = 0;
     int underflows = 0, overflows = 0;
 };
