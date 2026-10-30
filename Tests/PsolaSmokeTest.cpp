@@ -279,6 +279,61 @@ bool testVariableHostBlocks()
     return psolaPassed && identityPassed;
 }
 
+bool testStereoPsola()
+{
+    constexpr double sampleRate = 44100.0;
+    constexpr double frequency = 220.0;
+    constexpr int frameSize = 1024;
+    constexpr int channels = 2;
+    const int period = static_cast<int>(std::lround(sampleRate / frequency));
+    const int maxPeriod = static_cast<int>(std::ceil(sampleRate / 65.0));
+
+    TD_pitch_shift::Sola processor(channels, frameSize, maxPeriod);
+    juce::AudioBuffer<float> frame(channels, frameSize);
+    std::vector<float> leftCaptured, rightCaptured;
+    leftCaptured.reserve(180 * frameSize);
+    rightCaptured.reserve(180 * frameSize);
+
+    double phase = 0.0;
+    const double step = juce::MathConstants<double>::twoPi * frequency / sampleRate;
+    for (int block = 0; block < 220; ++block)
+    {
+        auto* left = frame.getWritePointer(0);
+        auto* right = frame.getWritePointer(1);
+        for (int i = 0; i < frameSize; ++i)
+        {
+            const float sample = 0.4f * static_cast<float>(std::sin(phase));
+            left[i] = sample;
+            right[i] = 0.25f * static_cast<float>(std::sin(phase + 0.37));
+            phase += step;
+            if (phase >= juce::MathConstants<double>::twoPi)
+                phase -= juce::MathConstants<double>::twoPi;
+        }
+
+        processor.Process(frame, period, -5.0);
+        for (int i = 0; i < frameSize; ++i)
+        {
+            if (!std::isfinite(left[i]) || !std::isfinite(right[i]))
+                return false;
+            if (block >= 40)
+            {
+                leftCaptured.push_back(left[i]);
+                rightCaptured.push_back(right[i]);
+            }
+        }
+    }
+
+    const double expected = frequency * std::pow(2.0, -5.0 / 12.0);
+    const double leftMeasured = estimateFrequency(leftCaptured, sampleRate, expected);
+    const double rightMeasured = estimateFrequency(rightCaptured, sampleRate, expected);
+    const double leftError = 1200.0 * std::log2(leftMeasured / expected);
+    const double rightError = 1200.0 * std::log2(rightMeasured / expected);
+    std::cout << "PSOLA stereo: left=" << leftMeasured << " Hz (" << leftError
+              << " cents), right=" << rightMeasured << " Hz (" << rightError
+              << " cents)" << std::endl;
+    return std::abs(leftError) <= 35.0 && std::abs(rightError) <= 35.0;
+}
+
 int measureImpulsePeak()
 {
     constexpr int channels = 1;
@@ -325,14 +380,16 @@ int main()
     const bool shiftedVoice4096 = runCase(44100.0, 220.0, -5.0, 4096);
     const bool unshiftedLowVoice = runCase(44100.0, 65.0, 0.0, 2048);
     const int impulsePeak = measureImpulsePeak();
+    const bool stereoPsola = testStereoPsola();
     const bool variableBlocks = testVariableHostBlocks();
 
-    if (!shiftedVoice1024 || !shiftedVoice2048 || !shiftedVoice4096 || !unshiftedLowVoice || impulsePeak < 0 || !variableBlocks)
+    if (!shiftedVoice1024 || !shiftedVoice2048 || !shiftedVoice4096 || !unshiftedLowVoice || impulsePeak < 0 || !stereoPsola || !variableBlocks)
     {
         std::cerr << "PSOLA quality test failed: shifted2048=" << shiftedVoice2048
                   << ", shifted1024=" << shiftedVoice1024 << ", shifted2048=" << shiftedVoice2048
                   << ", shifted4096=" << shiftedVoice4096 << ", unshiftedLowVoice=" << unshiftedLowVoice
-                  << ", impulsePeak=" << impulsePeak << ", variableBlocks=" << variableBlocks << std::endl;
+                  << ", impulsePeak=" << impulsePeak << ", stereoPsola=" << stereoPsola
+                  << ", variableBlocks=" << variableBlocks << std::endl;
         return 1;
     }
 
