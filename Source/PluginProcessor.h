@@ -46,7 +46,9 @@ private:
     static constexpr int delayBufferSize = 2048;
     std::array<float, pitchWindowSize> pitchBuffer {};
     int pitchWritePosition = 0;
-    int samplesSinceAnalysis = 0;\n    int audioSampleCounter = 0;\n    int pitchSamplesWritten = 0;
+    int samplesSinceAnalysis = 0;
+    int audioSampleCounter = 0;
+    int pitchSamplesWritten = 0;
     std::array<std::array<float, delayBufferSize>, 2> delayBuffers {};
     int delayWritePosition = 0;
     float shifterPhase = 0.0f;
