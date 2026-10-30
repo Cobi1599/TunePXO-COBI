@@ -43,7 +43,7 @@ void TunePXOCobiAudioProcessor::prepareToPlay(double sampleRate, int)
     for (auto& channel : delayBuffers)
         channel.fill(0.0f);
     pitchBuffer.fill(0.0f);
-    pitchWritePosition = samplesSinceAnalysis = delayWritePosition = 0;
+    pitchWritePosition = samplesSinceAnalysis = audioSampleCounter = pitchSamplesWritten = delayWritePosition = 0;
     shifterPhase = 0.0f;
     smoothedMidiNote = -1.0f;
     detectedMidiNote.store(-1, std::memory_order_relaxed);
@@ -75,9 +75,12 @@ int TunePXOCobiAudioProcessor::quantiseMidiNote(float midiNote, int key, int sca
 
 void TunePXOCobiAudioProcessor::analysePitch() noexcept
 {
-    // The detector runs at half the audio sample rate to keep CPU use modest.
-    float bestCorrelation = 0.0f;
-    int bestLag = 0;
+    // YIN-style difference function: prefer the first convincing period
+    // instead of the strongest autocorrelation peak (which may be a harmonic).
+    constexpr float yinThreshold = 0.16f;
+    std::array<float, maxPitchLag + 1> difference {};
+    std::array<float, maxPitchLag + 1> cumulativeMean {};
+
     float mean = 0.0f;
     for (float sample : pitchBuffer) mean += sample;
     mean /= (float)pitchWindowSize;
@@ -93,36 +96,57 @@ void TunePXOCobiAudioProcessor::analysePitch() noexcept
         return;
     }
 
+    const int available = pitchWindowSize - maxPitchLag;
     for (int lag = minPitchLag; lag <= maxPitchLag; ++lag) {
-        float correlation = 0.0f;
-        float leftEnergy = 0.0f, rightEnergy = 0.0f;
-        for (int i = 0; i < pitchWindowSize - lag; ++i) {
+        float sum = 0.0f;
+        for (int i = 0; i < available; ++i) {
             const float a = pitchBuffer[(pitchWritePosition + i) % pitchWindowSize] - mean;
             const float b = pitchBuffer[(pitchWritePosition + i + lag) % pitchWindowSize] - mean;
-            correlation += a * b;
-            leftEnergy += a * a;
-            rightEnergy += b * b;
+            const float delta = a - b;
+            sum += delta * delta;
         }
-        const float normaliser = std::sqrt(leftEnergy * rightEnergy) + 1.0e-9f;
-        correlation /= normaliser;
-        if (correlation > bestCorrelation) {
-            bestCorrelation = correlation;
+        difference[(size_t)lag] = sum;
+    }
+
+    float runningSum = 0.0f;
+    for (int lag = minPitchLag; lag <= maxPitchLag; ++lag) {
+        runningSum += difference[(size_t)lag];
+        cumulativeMean[(size_t)lag] = difference[(size_t)lag] * (float)(lag - minPitchLag + 1)
+                                     / (runningSum + 1.0e-12f);
+    }
+
+    int bestLag = 0;
+    for (int lag = minPitchLag + 1; lag < maxPitchLag; ++lag) {
+        if (cumulativeMean[(size_t)lag] < yinThreshold) {
+            while (lag + 1 <= maxPitchLag &&
+                   cumulativeMean[(size_t)(lag + 1)] < cumulativeMean[(size_t)lag])
+                ++lag;
             bestLag = lag;
+            break;
         }
     }
 
-    if (bestLag == 0 || bestCorrelation < minimumCorrelation) {
+    if (bestLag == 0) {
         detectedMidiNote.store(-1, std::memory_order_relaxed);
         detectedFrequency.store(0.0f, std::memory_order_relaxed);
         return;
     }
 
-    const float frequency = (float)(currentSampleRate / (double)(analysisDecimation * bestLag));
+    const float left = cumulativeMean[(size_t)(bestLag - 1)];
+    const float centre = cumulativeMean[(size_t)bestLag];
+    const float right = cumulativeMean[(size_t)(bestLag + 1)];
+    const float denominator = left - 2.0f * centre + right;
+    const float adjustment = std::abs(denominator) > 1.0e-9f
+        ? 0.5f * (left - right) / denominator : 0.0f;
+    const float refinedLag = (float)bestLag + juce::jlimit(-0.5f, 0.5f, adjustment);
+    const float frequency = (float)(currentSampleRate / (double)(analysisDecimation * refinedLag));
+
     if (frequency < 65.0f || frequency > 1000.0f) {
         detectedMidiNote.store(-1, std::memory_order_relaxed);
         detectedFrequency.store(0.0f, std::memory_order_relaxed);
         return;
     }
+
     const float midi = 69.0f + 12.0f * std::log2(frequency / 440.0f);
     detectedFrequency.store(frequency, std::memory_order_relaxed);
     detectedMidiNote.store((int)std::lround(midi), std::memory_order_relaxed);
@@ -198,16 +222,20 @@ void TunePXOCobiAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, j
     {
         const float mono = channels > 1 ? 0.5f * (left[i] + right[i]) : left[i];
 
-        if ((samplesSinceAnalysis++ % analysisDecimation) == 0)
+        if ((audioSampleCounter++ % analysisDecimation) == 0)
         {
             pitchBuffer[(size_t)pitchWritePosition] = mono;
             pitchWritePosition = (pitchWritePosition + 1) % pitchWindowSize;
-        }
+            pitchSamplesWritten = juce::jmin(pitchSamplesWritten + 1, pitchWindowSize);
 
-        if (samplesSinceAnalysis >= pitchWindowSize)
-        {
-            samplesSinceAnalysis = 0;
-            analysePitch();
+            // Update at 128 decimated samples (~5.8 ms at 44.1 kHz),
+            // using a complete rolling 512-sample analysis window.
+            if (++samplesSinceAnalysis >= 128)
+            {
+                samplesSinceAnalysis = 0;
+                if (pitchSamplesWritten >= pitchWindowSize)
+                    analysePitch();
+            }
         }
 
         const int detected = detectedMidiNote.load(std::memory_order_relaxed);
