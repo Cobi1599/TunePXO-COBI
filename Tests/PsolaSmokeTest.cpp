@@ -111,11 +111,12 @@ public:
     static constexpr int frameSize = 1024;
     static constexpr int ringSize = 8192;
 
-    VariableBlockAdapter(double sampleRate, double frequency, double semitones)
+    VariableBlockAdapter(double sampleRate, double frequency, double semitones, bool bypass = false)
         : processor(1, frameSize, static_cast<int>(std::ceil(sampleRate / 65.0))),
           frame(1, frameSize),
           period(static_cast<int>(std::lround(sampleRate / frequency))),
-          shift(semitones)
+          shift(semitones),
+          bypassProcessing(bypass)
     {
         // Prime output with silence to model the adapter's initial buffering.
         for (int i = 0; i < frameSize; ++i)
@@ -135,6 +136,7 @@ public:
 
     int samplesProcessed() const noexcept { return processed; }
     int outputUnderflows() const noexcept { return underflows; }
+    int outputOverflows() const noexcept { return overflows; }
 
 private:
     void pushInput(float value)
@@ -153,7 +155,8 @@ private:
             readInput = (readInput + 1) % ringSize;
             --inputCount;
         }
-        processor.Process(frame, period, shift);
+        if (!bypassProcessing)
+            processor.Process(frame, period, shift);
         for (int i = 0; i < frameSize; ++i)
             pushOutput(dst[i]);
         processed += frameSize;
@@ -162,7 +165,10 @@ private:
     void pushOutput(float value)
     {
         if (outputCount >= ringSize)
+        {
+            ++overflows;
             return;
+        }
         outputRing[writeOutput] = value;
         writeOutput = (writeOutput + 1) % ringSize;
         ++outputCount;
@@ -185,27 +191,31 @@ private:
     juce::AudioBuffer<float> frame;
     const int period;
     const double shift;
+    const bool bypassProcessing;
     std::array<float, ringSize> inputRing{}, outputRing{};
     int readInput=0, writeInput=0, inputCount=0;
     int readOutput=0, writeOutput=0, outputCount=0;
-    int processed=0, underflows=0;
+    int processed=0, underflows=0, overflows=0;
 };
 
 bool testVariableHostBlocks()
 {
     constexpr double sampleRate = 44100.0;
     constexpr double frequency = 220.0;
+    constexpr int totalSamples = 65536;
     constexpr int blockSizes[] = {64, 128, 256, 512, 1024, 192, 768, 48, 320};
-    VariableBlockAdapter adapter(sampleRate, frequency, -5.0);
+
+    VariableBlockAdapter psolaAdapter(sampleRate, frequency, -5.0);
     std::vector<float> input(1024), output(1024);
     double phase = 0.0;
     const double step = juce::MathConstants<double>::twoPi * frequency / sampleRate;
     int total = 0;
     size_t block = 0;
 
-    while (total < 65536)
+    while (total < totalSamples)
     {
-        const int count = std::min(blockSizes[block++ % (sizeof(blockSizes) / sizeof(blockSizes[0]))], 65536 - total);
+        const int count = std::min(blockSizes[block++ % (sizeof(blockSizes) / sizeof(blockSizes[0]))],
+                                   totalSamples - total);
         for (int i = 0; i < count; ++i)
         {
             input[static_cast<size_t>(i)] = 0.5f * static_cast<float>(std::sin(phase));
@@ -213,20 +223,60 @@ bool testVariableHostBlocks()
             if (phase >= juce::MathConstants<double>::twoPi)
                 phase -= juce::MathConstants<double>::twoPi;
         }
-        adapter.processHostBlock(input.data(), output.data(), count);
+        psolaAdapter.processHostBlock(input.data(), output.data(), count);
         for (int i = 0; i < count; ++i)
             if (!std::isfinite(output[static_cast<size_t>(i)]))
                 return false;
         total += count;
     }
 
-    const bool passed = adapter.samplesProcessed() == 65536
-        && adapter.outputUnderflows() == 0;
+    const bool psolaPassed = psolaAdapter.samplesProcessed() == totalSamples
+        && psolaAdapter.outputUnderflows() == 0
+        && psolaAdapter.outputOverflows() == 0;
+
+    VariableBlockAdapter identityAdapter(sampleRate, frequency, 0.0, true);
+    std::vector<float> identityInput(totalSamples), identityOutput(totalSamples);
+    for (int i = 0; i < totalSamples; ++i)
+        identityInput[static_cast<size_t>(i)] =
+            static_cast<float>((i * 37) % 1009) / 1009.0f - 0.5f;
+
+    total = 0;
+    block = 0;
+    while (total < totalSamples)
+    {
+        const int count = std::min(blockSizes[block++ % (sizeof(blockSizes) / sizeof(blockSizes[0]))],
+                                   totalSamples - total);
+        identityAdapter.processHostBlock(identityInput.data() + total,
+                                          identityOutput.data() + total, count);
+        total += count;
+    }
+
+    bool identityPreserved = true;
+    for (int i = 0; i < totalSamples; ++i)
+    {
+        const float expected = i < VariableBlockAdapter::frameSize
+            ? 0.0f : identityInput[static_cast<size_t>(i - VariableBlockAdapter::frameSize)];
+        if (identityOutput[static_cast<size_t>(i)] != expected)
+        {
+            identityPreserved = false;
+            break;
+        }
+    }
+
+    const bool identityPassed = identityAdapter.samplesProcessed() == totalSamples
+        && identityAdapter.outputUnderflows() == 0
+        && identityAdapter.outputOverflows() == 0
+        && identityPreserved;
+
     std::cout << "Variable host blocks: input=" << total
-              << ", PSOLA frames=" << adapter.samplesProcessed()
-              << ", output underflows=" << adapter.outputUnderflows()
+              << ", PSOLA frames=" << psolaAdapter.samplesProcessed()
+              << ", PSOLA underflows=" << psolaAdapter.outputUnderflows()
+              << ", PSOLA overflows=" << psolaAdapter.outputOverflows()
+              << ", identity FIFO=" << (identityPassed ? "exact" : "FAILED")
+              << ", identity underflows=" << identityAdapter.outputUnderflows()
+              << ", identity overflows=" << identityAdapter.outputOverflows()
               << std::endl;
-    return passed;
+    return psolaPassed && identityPassed;
 }
 
 int measureImpulsePeak()
