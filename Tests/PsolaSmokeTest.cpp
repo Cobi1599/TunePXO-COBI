@@ -47,21 +47,59 @@ bool runCase(double sampleRate, double frequency, double semitones)
 
     return outputSamples > 0 && outputEnergy / outputSamples > 1.0e-6;
 }
+
+int measureImpulsePeak()
+{
+    constexpr int channels = 1;
+    constexpr int frameSize = 256;
+    constexpr int maxPeriod = 679;
+    constexpr int totalFrames = 300;
+    TD_pitch_shift::Sola processor(channels, frameSize, maxPeriod);
+    juce::AudioBuffer<float> frame(channels, frameSize);
+    int sampleIndex = 0;
+    int peakIndex = -1;
+    float peak = 0.0f;
+
+    for (int block = 0; block < totalFrames; ++block)
+    {
+        frame.clear();
+        if (block == 0)
+            frame.setSample(0, 0, 1.0f);
+
+        processor.Process(frame, 200, -5.0);
+
+        for (int i = 0; i < frameSize; ++i, ++sampleIndex)
+        {
+            const float value = std::abs(frame.getSample(0, i));
+            if (value > peak)
+            {
+                peak = value;
+                peakIndex = sampleIndex;
+            }
+        }
+    }
+
+    std::cout << "PSOLA impulse peak index=" << peakIndex
+              << ", peak=" << peak << std::endl;
+    return peakIndex;
+}
 }
 
 int main()
 {
     const bool midVoice = runCase(44100.0, 220.0, -5.0);
-    const bool lowVoice = runCase(44100.0, 65.0, 0.0);\n    const int impulsePeak = measureImpulsePeak();
+    const bool lowVoice = runCase(44100.0, 65.0, 0.0);
+    const int impulsePeak = measureImpulsePeak();
 
-    if (!midVoice || !lowVoice)
+    if (!midVoice || !lowVoice || impulsePeak < 0)
     {
         std::cerr << "PSOLA smoke test failed: midVoice=" << midVoice
-                  << ", lowVoice=" << lowVoice << std::endl;
+                  << ", lowVoice=" << lowVoice
+                  << ", impulsePeak=" << impulsePeak << std::endl;
         return 1;
     }
 
-    std::cout << "PSOLA smoke test passed for 220 Hz shifted and 65 Hz unshifted input; impulse peak sample=" << impulsePeak
-              << std::endl;
+    std::cout << "PSOLA smoke test passed; impulse peak sample="
+              << impulsePeak << std::endl;
     return 0;
 }
