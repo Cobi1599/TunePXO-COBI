@@ -54,6 +54,8 @@ private:
     float shifterPhase = 0.0f;
     float smoothedMidiNote = -1.0f;
     float smoothedPitchRatio = 1.0f;
+    float heldTargetPitchRatio = 1.0f;
+    int samplesSinceValidPitch = 0;
     double currentSampleRate = 44100.0;
     std::atomic<int> detectedMidiNote { -1 };
     std::atomic<float> detectedFrequency { 0.0f };
