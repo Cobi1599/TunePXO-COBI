@@ -10,34 +10,42 @@ namespace
 double estimateFrequency(const std::vector<float>& samples, double sampleRate,
                          double expectedFrequency)
 {
-    const int expectedLag = static_cast<int>(std::lround(sampleRate / expectedFrequency));
-    const int minLag = std::max(2, static_cast<int>(std::floor(expectedLag * 0.50)));
-    const int maxLag = static_cast<int>(std::ceil(expectedLag * 1.50));
-    const size_t usable = samples.size() - static_cast<size_t>(maxLag);
-    double bestScore = -1.0;
-    int bestLag = 0;
+    // Direct spectral scan around the expected fundamental. This avoids
+    // autocorrelation selecting a longer sub-period in the PSOLA waveform.
+    const size_t count = std::min<size_t>(samples.size(), 32768);
+    if (count < 4096)
+        return 0.0;
 
-    for (int lag = minLag; lag <= maxLag; ++lag)
+    const double minFrequency = expectedFrequency * 0.70;
+    const double maxFrequency = expectedFrequency * 1.30;
+    constexpr double frequencyStep = 0.25;
+    double bestFrequency = 0.0;
+    double bestMagnitude = -1.0;
+
+    for (double frequency = minFrequency; frequency <= maxFrequency;
+         frequency += frequencyStep)
     {
-        double cross = 0.0;
-        double energyA = 0.0;
-        double energyB = 0.0;
-        for (size_t i = 0; i < usable; ++i)
+        double real = 0.0;
+        double imag = 0.0;
+        for (size_t i = 0; i < count; ++i)
         {
-            const double a = samples[i];
-            const double b = samples[i + static_cast<size_t>(lag)];
-            cross += a * b;
-            energyA += a * a;
-            energyB += b * b;
+            const double window = 0.5 - 0.5 * std::cos(
+                juce::MathConstants<double>::twoPi * static_cast<double>(i)
+                / static_cast<double>(count - 1));
+            const double angle = juce::MathConstants<double>::twoPi
+                * frequency * static_cast<double>(i) / sampleRate;
+            const double value = static_cast<double>(samples[i]) * window;
+            real += value * std::cos(angle);
+            imag -= value * std::sin(angle);
         }
-        const double score = cross / std::sqrt(energyA * energyB + 1.0e-20);
-        if (score > bestScore)
+        const double magnitude = real * real + imag * imag;
+        if (magnitude > bestMagnitude)
         {
-            bestScore = score;
-            bestLag = lag;
+            bestMagnitude = magnitude;
+            bestFrequency = frequency;
         }
     }
-    return bestLag > 0 ? sampleRate / bestLag : 0.0;
+    return bestFrequency;
 }
 
 bool runCase(double sampleRate, double frequency, double semitones)
