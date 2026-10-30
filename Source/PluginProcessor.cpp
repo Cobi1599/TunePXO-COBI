@@ -46,6 +46,8 @@ void TunePXOCobiAudioProcessor::prepareToPlay(double sampleRate, int)
     psola.prepare(currentSampleRate);
     for (auto& channel : psolaDryRing) channel.fill(0.0f);
     dryWritePosition = 0;
+    for (auto& channel : legacyLatencyRing) channel.fill(0.0f);
+    legacyLatencyWritePosition = 0;
     lastPsolaPeriod = PsolaRealtimeAdapter::periodFromFrequency(currentSampleRate, 220.0);
     // Impulse-peak alignment estimates measured in the production adapter.
     const double rates[] = { 44100.0, 48000.0, 96000.0 };
@@ -340,6 +342,15 @@ void TunePXOCobiAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, j
         if (shifterPhase >= 1.0f) shifterPhase -= 1.0f;
         if (shifterPhase < 0.0f) shifterPhase += 1.0f;
         delayWritePosition = (delayWritePosition + 1) % delayBufferSize;
+
+        // Keep the legacy engine's output delay equal to the PSOLA path so
+        // the host's fixed plug-in latency remains valid when ENGINE changes.
+        legacyLatencyRing[0][(size_t)legacyLatencyWritePosition] = left[i];
+        legacyLatencyRing[1][(size_t)legacyLatencyWritePosition] = right != nullptr ? right[i] : left[i];
+        int legacyRead = (legacyLatencyWritePosition - psolaLatencySamples + dryRingSize) % dryRingSize;
+        left[i] = legacyLatencyRing[0][(size_t)legacyRead];
+        if (right != nullptr) right[i] = legacyLatencyRing[1][(size_t)legacyRead];
+        legacyLatencyWritePosition = (legacyLatencyWritePosition + 1) % dryRingSize;
         }
     }
     if (engine == 1) {
