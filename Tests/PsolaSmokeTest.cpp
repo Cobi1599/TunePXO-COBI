@@ -1,24 +1,60 @@
 #include "sola.h"
 
+#include <algorithm>
 #include <cmath>
 #include <iostream>
+#include <vector>
 
 namespace
 {
+double estimateFrequency(const std::vector<float>& samples, double sampleRate,
+                         double expectedFrequency)
+{
+    const int expectedLag = static_cast<int>(std::lround(sampleRate / expectedFrequency));
+    const int minLag = std::max(2, static_cast<int>(std::floor(expectedLag * 0.85)));
+    const int maxLag = static_cast<int>(std::ceil(expectedLag * 1.15));
+    const size_t usable = samples.size() - static_cast<size_t>(maxLag);
+    double bestScore = -1.0;
+    int bestLag = 0;
+
+    for (int lag = minLag; lag <= maxLag; ++lag)
+    {
+        double cross = 0.0;
+        double energyA = 0.0;
+        double energyB = 0.0;
+        for (size_t i = 0; i < usable; ++i)
+        {
+            const double a = samples[i];
+            const double b = samples[i + static_cast<size_t>(lag)];
+            cross += a * b;
+            energyA += a * a;
+            energyB += b * b;
+        }
+        const double score = cross / std::sqrt(energyA * energyB + 1.0e-20);
+        if (score > bestScore)
+        {
+            bestScore = score;
+            bestLag = lag;
+        }
+    }
+    return bestLag > 0 ? sampleRate / bestLag : 0.0;
+}
+
 bool runCase(double sampleRate, double frequency, double semitones)
 {
     constexpr int channels = 1;
     constexpr int frameSize = 256;
     const int maxPeriod = static_cast<int>(std::ceil(sampleRate / 65.0));
     const int period = static_cast<int>(std::lround(sampleRate / frequency));
+    const double expectedOutput = frequency * std::pow(2.0, semitones / 12.0);
 
     TD_pitch_shift::Sola processor(channels, frameSize, maxPeriod);
     juce::AudioBuffer<float> frame(channels, frameSize);
+    std::vector<float> captured;
+    captured.reserve(400 * frameSize);
 
     double phase = 0.0;
     const double phaseStep = juce::MathConstants<double>::twoPi * frequency / sampleRate;
-    double outputEnergy = 0.0;
-    int outputSamples = 0;
 
     for (int block = 0; block < 400; ++block)
     {
@@ -37,15 +73,25 @@ bool runCase(double sampleRate, double frequency, double semitones)
         {
             if (!std::isfinite(samples[i]))
                 return false;
-            if (block > 40)
-            {
-                outputEnergy += static_cast<double>(samples[i]) * samples[i];
-                ++outputSamples;
-            }
+            if (block >= 80)
+                captured.push_back(samples[i]);
         }
     }
 
-    return outputSamples > 0 && outputEnergy / outputSamples > 1.0e-6;
+    double energy = 0.0;
+    for (float sample : captured)
+        energy += static_cast<double>(sample) * sample;
+    const double measuredFrequency = estimateFrequency(captured, sampleRate, expectedOutput);
+    const double errorCents = measuredFrequency > 0.0
+        ? 1200.0 * std::log2(measuredFrequency / expectedOutput) : 10000.0;
+
+    std::cout << "PSOLA input=" << frequency << " Hz, shift=" << semitones
+              << " st, expected=" << expectedOutput << " Hz, measured="
+              << measuredFrequency << " Hz, error=" << errorCents << " cents"
+              << std::endl;
+
+    return !captured.empty() && energy / captured.size() > 1.0e-6
+        && std::abs(errorCents) <= 35.0;
 }
 
 int measureImpulsePeak()
@@ -87,19 +133,18 @@ int measureImpulsePeak()
 
 int main()
 {
-    const bool midVoice = runCase(44100.0, 220.0, -5.0);
-    const bool lowVoice = runCase(44100.0, 65.0, 0.0);
+    const bool shiftedVoice = runCase(44100.0, 220.0, -5.0);
+    const bool unshiftedLowVoice = runCase(44100.0, 65.0, 0.0);
     const int impulsePeak = measureImpulsePeak();
 
-    if (!midVoice || !lowVoice || impulsePeak < 0)
+    if (!shiftedVoice || !unshiftedLowVoice || impulsePeak < 0)
     {
-        std::cerr << "PSOLA smoke test failed: midVoice=" << midVoice
-                  << ", lowVoice=" << lowVoice
+        std::cerr << "PSOLA quality test failed: shiftedVoice=" << shiftedVoice
+                  << ", unshiftedLowVoice=" << unshiftedLowVoice
                   << ", impulsePeak=" << impulsePeak << std::endl;
         return 1;
     }
 
-    std::cout << "PSOLA smoke test passed; impulse peak sample="
-              << impulsePeak << std::endl;
+    std::cout << "PSOLA frequency and impulse tests passed." << std::endl;
     return 0;
 }
