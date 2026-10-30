@@ -1,4 +1,5 @@
 #include "sola.h"
+#include "PsolaRealtimeAdapter.h"
 
 #include <algorithm>
 #include <array>
@@ -334,6 +335,59 @@ bool testStereoPsola()
     return std::abs(leftError) <= 35.0 && std::abs(rightError) <= 35.0;
 }
 
+bool testProductionAdapter()
+{
+    constexpr double sampleRate = 48000.0;
+    constexpr double frequency = 220.0;
+    constexpr int totalSamples = 65536;
+    constexpr int blockSizes[] = {64, 128, 256, 512, 1024, 192, 768, 48, 320};
+
+    PsolaRealtimeAdapter adapter;
+    adapter.prepare(sampleRate);
+    juce::AudioBuffer<float> block(2, 1024);
+    const int period = PsolaRealtimeAdapter::periodFromFrequency(sampleRate, frequency);
+    if (period != 218
+        || PsolaRealtimeAdapter::periodFromFrequency(44100.0, 220.0) != 200
+        || PsolaRealtimeAdapter::periodFromFrequency(96000.0, 220.0) != 436)
+        return false;
+
+    double phase = 0.0;
+    const double step = juce::MathConstants<double>::twoPi * frequency / sampleRate;
+    int processed = 0;
+    size_t blockIndex = 0;
+    while (processed < totalSamples)
+    {
+        const int count = std::min(blockSizes[blockIndex++ % (sizeof(blockSizes) / sizeof(blockSizes[0]))],
+                                   totalSamples - processed);
+        for (int i = 0; i < count; ++i)
+        {
+            const float sample = 0.35f * static_cast<float>(std::sin(phase));
+            block.setSample(0, i, sample);
+            block.setSample(1, i, 0.7f * sample);
+            phase += step;
+            if (phase >= juce::MathConstants<double>::twoPi)
+                phase -= juce::MathConstants<double>::twoPi;
+        }
+        // JUCE buffers retain their maximum size; expose the current host block
+        // by processing a view-sized temporary without allocating in the adapter.
+        juce::AudioBuffer<float> hostBlock(block.getArrayOfWritePointers(), 2, count);
+        adapter.process(hostBlock, period, -5.0);
+        for (int ch = 0; ch < 2; ++ch)
+            for (int i = 0; i < count; ++i)
+                if (!std::isfinite(hostBlock.getSample(ch, i)))
+                    return false;
+        processed += count;
+    }
+
+    std::cout << "Production adapter: sampleRate=" << sampleRate
+              << ", period=" << period
+              << ", reported FIFO latency=" << adapter.getLatencySamples()
+              << ", underflows=" << adapter.getUnderflows()
+              << ", overflows=" << adapter.getOverflows() << std::endl;
+    return adapter.getUnderflows() == 0 && adapter.getOverflows() == 0
+        && adapter.getLatencySamples() == 1024;
+}
+
 int measureImpulsePeak()
 {
     constexpr int channels = 1;
@@ -382,14 +436,15 @@ int main()
     const int impulsePeak = measureImpulsePeak();
     const bool stereoPsola = testStereoPsola();
     const bool variableBlocks = testVariableHostBlocks();
+    const bool productionAdapter = testProductionAdapter();
 
-    if (!shiftedVoice1024 || !shiftedVoice2048 || !shiftedVoice4096 || !unshiftedLowVoice || impulsePeak < 0 || !stereoPsola || !variableBlocks)
+    if (!shiftedVoice1024 || !shiftedVoice2048 || !shiftedVoice4096 || !unshiftedLowVoice || impulsePeak < 0 || !stereoPsola || !variableBlocks || !productionAdapter)
     {
         std::cerr << "PSOLA quality test failed: shifted2048=" << shiftedVoice2048
                   << ", shifted1024=" << shiftedVoice1024 << ", shifted2048=" << shiftedVoice2048
                   << ", shifted4096=" << shiftedVoice4096 << ", unshiftedLowVoice=" << unshiftedLowVoice
                   << ", impulsePeak=" << impulsePeak << ", stereoPsola=" << stereoPsola
-                  << ", variableBlocks=" << variableBlocks << std::endl;
+                  << ", variableBlocks=" << variableBlocks << ", productionAdapter=" << productionAdapter << std::endl;
         return 1;
     }
 
