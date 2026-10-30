@@ -46,6 +46,7 @@ void TunePXOCobiAudioProcessor::prepareToPlay(double sampleRate, int)
     pitchWritePosition = samplesSinceAnalysis = audioSampleCounter = pitchSamplesWritten = delayWritePosition = 0;
     shifterPhase = 0.0f;
     smoothedMidiNote = -1.0f;
+    smoothedPitchRatio = 1.0f;
     detectedMidiNote.store(-1, std::memory_order_relaxed);
     detectedFrequency.store(0.0f, std::memory_order_relaxed);
 }
@@ -185,8 +186,12 @@ float TunePXOCobiAudioProcessor::processPitchShift(int channel, float input, flo
     const float weightB = 1.0f - weightA;
     const float shifted = readDelay(channel, delayA) * weightA + readDelay(channel, delayB) * weightB;
 
+    // Fade gently to the dry path around unity pitch to avoid a hard switch click.
+    const float correctionAmount = std::abs(1.0f - ratio);
+    const float wetAmount = juce::jlimit(0.0f, 1.0f,
+        (correctionAmount - 0.0005f) / 0.0025f);
     juce::ignoreUnused(phaseStep);
-    return std::abs(ratio - 1.0f) < 0.0005f ? input : shifted;
+    return input + (shifted - input) * wetAmount;
 }
 
 void TunePXOCobiAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer&)
@@ -240,7 +245,7 @@ void TunePXOCobiAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, j
 
         const int detected = detectedMidiNote.load(std::memory_order_relaxed);
         const float frequency = detectedFrequency.load(std::memory_order_relaxed);
-        float ratio = 1.0f;
+        float targetRatio = 1.0f;
 
         if (detected >= 0 && frequency > 0.0f)
         {
@@ -252,12 +257,19 @@ void TunePXOCobiAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, j
 
             smoothedMidiNote += (targetMidi - smoothedMidiNote) * smoothing;
             const float correctionSemitones = smoothedMidiNote - originalMidi;
-            ratio = std::pow(2.0f, correctionSemitones / 12.0f);
+            targetRatio = std::pow(2.0f, correctionSemitones / 12.0f);
         }
         else
         {
             smoothedMidiNote = -1.0f;
         }
+
+        // Smooth ratio changes, including brief detector dropouts, to suppress tiny RF-like ticks.
+        constexpr float ratioSmoothingSeconds = 0.004f;
+        const float ratioSmoothing = 1.0f - std::exp(
+            -1.0f / (ratioSmoothingSeconds * (float)currentSampleRate));
+        smoothedPitchRatio += (targetRatio - smoothedPitchRatio) * ratioSmoothing;
+        const float ratio = smoothedPitchRatio;
 
         const float dryLeft = left[i];
         const float wetLeft = processPitchShift(0, dryLeft, ratio);
