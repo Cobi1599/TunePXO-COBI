@@ -52,7 +52,7 @@ bool runCase(double sampleRate, double frequency, double semitones)
 int main()
 {
     const bool midVoice = runCase(44100.0, 220.0, -5.0);
-    const bool lowVoice = runCase(44100.0, 65.0, 0.0);
+    const bool lowVoice = runCase(44100.0, 65.0, 0.0);\n    const int impulsePeak = measureImpulsePeak();
 
     if (!midVoice || !lowVoice)
     {
@@ -61,7 +61,7 @@ int main()
         return 1;
     }
 
-    std::cout << "PSOLA smoke test passed for 220 Hz shifted and 65 Hz unshifted input."
+    std::cout << "PSOLA smoke test passed for 220 Hz shifted and 65 Hz unshifted input; impulse peak sample=" << impulsePeak
               << std::endl;
     return 0;
 }
