@@ -572,19 +572,29 @@ bool testAbruptControlTransitions()
     constexpr int totalFrames = 240;
     constexpr int transitionFrames[] = { 80, 120, 160 };
     constexpr double shifts[] = { 0.0, -5.0, 5.0, 0.0 };
+    constexpr int smoothingFrames = 8;
     const int maxPeriod = static_cast<int>(std::ceil(sampleRate / 65.0));
     const int period = static_cast<int>(std::lround(sampleRate / inputFrequency));
 
-    TD_pitch_shift::Sola processor(1, frameSize, maxPeriod);
-    TD_pitch_shift::Sola baselineProcessor(1, frameSize, maxPeriod);
-    juce::AudioBuffer<float> frame(1, frameSize);
-    juce::AudioBuffer<float> baselineFrame(1, frameSize);
-    std::vector<float> output;
-    std::vector<float> baselineOutput;
-    output.reserve(totalFrames * frameSize);
-    baselineOutput.reserve(totalFrames * frameSize);
+    TD_pitch_shift::Sola abruptProcessor(1, frameSize, maxPeriod);
+    TD_pitch_shift::Sola smoothProcessor(1, frameSize, maxPeriod);
+    std::array<std::unique_ptr<TD_pitch_shift::Sola>, 4> referenceProcessors;
+    for (auto& reference : referenceProcessors)
+        reference = std::make_unique<TD_pitch_shift::Sola>(1, frameSize, maxPeriod);
+
+    juce::AudioBuffer<float> abruptFrame(1, frameSize);
+    juce::AudioBuffer<float> smoothFrame(1, frameSize);
+    juce::AudioBuffer<float> referenceFrame(1, frameSize);
+    std::vector<float> abruptOutput, smoothOutput;
+    std::array<std::vector<float>, 4> referenceOutput;
+    abruptOutput.reserve(totalFrames * frameSize);
+    smoothOutput.reserve(totalFrames * frameSize);
+    for (auto& samples : referenceOutput)
+        samples.reserve(totalFrames * frameSize);
+
     double phase = 0.0;
     bool allFinite = true;
+    double previousSmoothShift = shifts[0];
 
     for (int block = 0; block < totalFrames; ++block)
     {
@@ -593,86 +603,97 @@ bool testAbruptControlTransitions()
             if (block >= transition)
                 ++state;
 
-        auto* samples = frame.getWritePointer(0);
-        auto* baselineSamples = baselineFrame.getWritePointer(0);
+        double smoothShift = shifts[state];
+        for (size_t transitionIndex = 0; transitionIndex < std::size(transitionFrames); ++transitionIndex)
+        {
+            const int transition = transitionFrames[transitionIndex];
+            if (block >= transition && block < transition + smoothingFrames)
+            {
+                const double progress = static_cast<double>(block - transition + 1)
+                    / static_cast<double>(smoothingFrames);
+                smoothShift = shifts[transitionIndex]
+                    + (shifts[transitionIndex + 1] - shifts[transitionIndex]) * progress;
+                break;
+            }
+        }
+
+        auto* abruptSamples = abruptFrame.getWritePointer(0);
+        auto* smoothSamples = smoothFrame.getWritePointer(0);
+        auto* referenceSamples = referenceFrame.getWritePointer(0);
         for (int i = 0; i < frameSize; ++i)
         {
             const float input = 0.4f * static_cast<float>(std::sin(phase));
-            samples[i] = input;
-            baselineSamples[i] = input;
+            abruptSamples[i] = input;
+            smoothSamples[i] = input;
+            referenceSamples[i] = input;
             phase += juce::MathConstants<double>::twoPi * inputFrequency / sampleRate;
             if (phase >= juce::MathConstants<double>::twoPi)
                 phase -= juce::MathConstants<double>::twoPi;
         }
 
-        processor.Process(frame, period, shifts[state]);
-        // Constant -5 semitones provides a same-signal, same-engine reference
-        // with no automation edge. This separates ordinary PSOLA waveform
-        // slopes from extra discontinuities caused by abrupt control changes.
-        baselineProcessor.Process(baselineFrame, period, -5.0);
-        for (int i = 0; i < frameSize; ++i)
+        abruptProcessor.Process(abruptFrame, period, shifts[state]);
+        smoothProcessor.Process(smoothFrame, period, smoothShift);
+        for (int i = 0; i < 4; ++i)
         {
-            allFinite = allFinite && std::isfinite(samples[i])
-                && std::isfinite(baselineSamples[i]);
-            output.push_back(samples[i]);
-            baselineOutput.push_back(baselineSamples[i]);
+            referenceProcessors[static_cast<size_t>(i)]->Process(referenceFrame, period,
+                                                                  shifts[static_cast<size_t>(i)]);
+            for (int sample = 0; sample < frameSize; ++sample)
+                referenceOutput[static_cast<size_t>(i)].push_back(referenceSamples[sample]);
+            // Restore the common input before running the next independent reference.
+            for (int sample = 0; sample < frameSize; ++sample)
+                referenceSamples[sample] = 0.4f * static_cast<float>(std::sin(
+                    phase - juce::MathConstants<double>::twoPi * inputFrequency
+                        * static_cast<double>(frameSize - sample) / sampleRate));
         }
+
+        for (int sample = 0; sample < frameSize; ++sample)
+        {
+            allFinite = allFinite && std::isfinite(abruptSamples[sample])
+                && std::isfinite(smoothSamples[sample]);
+            abruptOutput.push_back(abruptSamples[sample]);
+            smoothOutput.push_back(smoothSamples[sample]);
+        }
+        previousSmoothShift = smoothShift;
+        (void) previousSmoothShift;
     }
 
-    double worstPeakStep = 0.0;
-    double worstRmsStep = 0.0;
-    double worstBaselinePeakStep = 0.0;
-    double worstBaselineRmsStep = 0.0;
-    double worstPeakToBaseline = 0.0;
+    double worstAbruptRatio = 0.0;
+    double worstSmoothRatio = 0.0;
     for (size_t transitionIndex = 0; transitionIndex < std::size(transitionFrames); ++transitionIndex)
     {
         const int transition = transitionFrames[transitionIndex];
         const int expected = transition * frameSize + 1358;
         const int begin = std::max(1, expected - 2 * frameSize);
-        const int end = std::min(static_cast<int>(output.size()) - 1,
+        const int end = std::min(static_cast<int>(abruptOutput.size()) - 1,
                                  expected + 2 * frameSize);
-        double sumSquares = 0.0;
-        double baselineSumSquares = 0.0;
-        double peakStep = 0.0;
-        double baselinePeakStep = 0.0;
-        int count = 0;
-        for (int i = begin; i < end; ++i)
+        const size_t referenceIndex = transitionIndex + 1;
+        auto peakStep = [begin, end](const std::vector<float>& samples)
         {
-            const double step = std::abs(static_cast<double>(output[static_cast<size_t>(i)])
-                                        - output[static_cast<size_t>(i - 1)]);
-            const double baselineStep = std::abs(
-                static_cast<double>(baselineOutput[static_cast<size_t>(i)])
-                - baselineOutput[static_cast<size_t>(i - 1)]);
-            peakStep = std::max(peakStep, step);
-            baselinePeakStep = std::max(baselinePeakStep, baselineStep);
-            sumSquares += step * step;
-            baselineSumSquares += baselineStep * baselineStep;
-            ++count;
-        }
-        const double rmsStep = count > 0 ? std::sqrt(sumSquares / count) : 0.0;
-        const double baselineRmsStep = count > 0
-            ? std::sqrt(baselineSumSquares / count) : 0.0;
-        const double peakToBaseline = baselinePeakStep > 0.0
-            ? peakStep / baselinePeakStep : 0.0;
-        worstPeakStep = std::max(worstPeakStep, peakStep);
-        worstRmsStep = std::max(worstRmsStep, rmsStep);
-        worstBaselinePeakStep = std::max(worstBaselinePeakStep, baselinePeakStep);
-        worstBaselineRmsStep = std::max(worstBaselineRmsStep, baselineRmsStep);
-        worstPeakToBaseline = std::max(worstPeakToBaseline, peakToBaseline);
-        std::cout << "PSOLA abrupt control transition frame=" << transition
-                  << ", new-shift=" << shifts[transitionIndex + 1]
-                  << ", peak-step=" << peakStep << ", local-rms-step=" << rmsStep
-                  << ", baseline-peak-step=" << baselinePeakStep
-                  << ", baseline-rms-step=" << baselineRmsStep
-                  << ", peak/baseline=" << peakToBaseline << std::endl;
+            double peak = 0.0;
+            for (int i = begin; i < end; ++i)
+                peak = std::max(peak, std::abs(static_cast<double>(samples[static_cast<size_t>(i)])
+                    - samples[static_cast<size_t>(i - 1)]));
+            return peak;
+        };
+        const double abruptPeak = peakStep(abruptOutput);
+        const double smoothPeak = peakStep(smoothOutput);
+        const double referencePeak = peakStep(referenceOutput[referenceIndex]);
+        const double abruptRatio = referencePeak > 0.0 ? abruptPeak / referencePeak : 0.0;
+        const double smoothRatio = referencePeak > 0.0 ? smoothPeak / referencePeak : 0.0;
+        worstAbruptRatio = std::max(worstAbruptRatio, abruptRatio);
+        worstSmoothRatio = std::max(worstSmoothRatio, smoothRatio);
+        std::cout << "PSOLA transition frame=" << transition
+                  << ", target-shift=" << shifts[referenceIndex]
+                  << ", abrupt/reference=" << abruptRatio
+                  << ", smoothed/reference=" << smoothRatio
+                  << ", smoothing-frames=" << smoothingFrames << std::endl;
     }
 
-    std::cout << "PSOLA abrupt transition comparison: finite=" << allFinite
-              << ", worst peak-step=" << worstPeakStep
-              << ", worst baseline peak-step=" << worstBaselinePeakStep
-              << ", worst peak/baseline=" << worstPeakToBaseline << std::endl;
-    return allFinite && worstPeakStep > 0.0 && worstBaselinePeakStep > 0.0
-        && std::isfinite(worstPeakToBaseline);
+    std::cout << "PSOLA transition smoothing comparison: finite=" << allFinite
+              << ", worst abrupt/reference=" << worstAbruptRatio
+              << ", worst smoothed/reference=" << worstSmoothRatio << std::endl;
+    return allFinite && std::isfinite(worstAbruptRatio) && std::isfinite(worstSmoothRatio)
+        && worstAbruptRatio > 0.0 && worstSmoothRatio > 0.0;
 }
 
 bool testStereoPsola()
