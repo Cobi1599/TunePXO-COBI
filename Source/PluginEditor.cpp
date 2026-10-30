@@ -30,7 +30,7 @@ TunePXOCobiAudioProcessorEditor::TunePXOCobiAudioProcessorEditor(TunePXOCobiAudi
     styleLabel(mixLabel, "CORRECTION MIX", 10.5f, muted);
     styleLabel(pitchCaption, "LIVE PITCH MONITOR", 10.0f, muted);
     styleLabel(pitchValue, "--", 34.0f, white);
-    styleLabel(status, "AUDIO PASS-THROUGH  /  PITCH CORRECTION DSP IN DEVELOPMENT", 9.5f, muted, false);
+    styleLabel(status, "REAL-TIME PITCH DETECTION + CORRECTION ENGINE  /  BETA", 9.5f, muted, false);
 
     for (auto* c : { &title, &subtitle, &modeLabel, &keyLabel, &scaleLabel, &retuneLabel,
                      &humanizeLabel, &mixLabel, &pitchCaption, &pitchValue, &status })
@@ -72,6 +72,20 @@ TunePXOCobiAudioProcessorEditor::TunePXOCobiAudioProcessorEditor(TunePXOCobiAudi
     retuneAttachment = std::make_unique<SliderAttachment>(state, "RETUNE", retuneSlider);
     humanizeAttachment = std::make_unique<SliderAttachment>(state, "HUMANIZE", humanizeSlider);
     mixAttachment = std::make_unique<SliderAttachment>(state, "MIX", mixSlider);
+    startTimerHz(15);
+}
+
+void TunePXOCobiAudioProcessorEditor::timerCallback()
+{
+    static const juce::StringArray noteNames { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
+    const int midi = audioProcessor.getDetectedMidiNote();
+    const float hz = audioProcessor.getDetectedFrequency();
+    if (midi < 0 || hz <= 0.0f) {
+        pitchValue.setText("--", juce::dontSendNotification);
+        return;
+    }
+    const int octave = midi / 12 - 1;
+    pitchValue.setText(noteNames[midi % 12] + juce::String(octave) + "  " + juce::String(hz, 1) + " Hz", juce::dontSendNotification);
 }
 
 void TunePXOCobiAudioProcessorEditor::paint(juce::Graphics& g)
