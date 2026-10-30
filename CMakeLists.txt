@@ -54,7 +54,7 @@ add_executable(PsolaSmokeTest
     Tests/PsolaSmokeTest.cpp
     ThirdParty/psola/sola.cpp
 )
-target_include_directories(PsolaSmokeTest PRIVATE ThirdParty/psola)
+target_include_directories(PsolaSmokeTest PRIVATE Source ThirdParty/psola)
 target_compile_features(PsolaSmokeTest PRIVATE cxx_std_17)
 target_link_libraries(PsolaSmokeTest PRIVATE
     juce::juce_audio_basics
