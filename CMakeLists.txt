@@ -30,7 +30,9 @@ juce_generate_juce_header(TunePXO_COBI)
 target_sources(TunePXO_COBI PRIVATE
     Source/PluginProcessor.cpp
     Source/PluginEditor.cpp
+    ThirdParty/psola/sola.cpp
 )
+target_include_directories(TunePXO_COBI PRIVATE ThirdParty/psola)
 target_compile_features(TunePXO_COBI PRIVATE cxx_std_17)
 target_compile_definitions(TunePXO_COBI PUBLIC
     JUCE_WEB_BROWSER=0
