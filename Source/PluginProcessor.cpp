@@ -46,6 +46,7 @@ void TunePXOCobiAudioProcessor::prepareToPlay(double sampleRate, int)
     pitchWritePosition = samplesSinceAnalysis = audioSampleCounter = pitchSamplesWritten = delayWritePosition = 0;
     shifterPhase = 0.0f;
     smoothedMidiNote = -1.0f;
+    smoothedCorrectionSemitones = 0.0f;
     smoothedPitchRatio = 1.0f;
     heldTargetPitchRatio = 1.0f;
     samplesSinceValidPitch = 0;
@@ -254,12 +255,17 @@ void TunePXOCobiAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, j
             const float originalMidi = 69.0f + 12.0f * std::log2(frequency / 440.0f);
             const float targetMidi = (float)quantiseMidiNote(originalMidi, key, scale);
 
+            // Smooth the correction interval itself, not the target MIDI note.
+            // This prevents the previous note's target from being subtracted
+            // from the newly detected pitch during note transitions.
+            const float desiredCorrectionSemitones = targetMidi - originalMidi;
             if (smoothedMidiNote < 0.0f)
-                smoothedMidiNote = originalMidi;
-
-            smoothedMidiNote += (targetMidi - smoothedMidiNote) * smoothing;
-            const float correctionSemitones = smoothedMidiNote - originalMidi;
-            targetRatio = std::pow(2.0f, correctionSemitones / 12.0f);
+                smoothedCorrectionSemitones = desiredCorrectionSemitones;
+            else
+                smoothedCorrectionSemitones +=
+                    (desiredCorrectionSemitones - smoothedCorrectionSemitones) * smoothing;
+            smoothedMidiNote = originalMidi;
+            targetRatio = std::pow(2.0f, smoothedCorrectionSemitones / 12.0f);
             heldTargetPitchRatio = targetRatio;
             samplesSinceValidPitch = 0;
         }
