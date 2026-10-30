@@ -51,7 +51,9 @@ double estimateFrequency(const std::vector<float>& samples, double sampleRate,
 bool runCase(double sampleRate, double frequency, double semitones)
 {
     constexpr int channels = 1;
-    constexpr int frameSize = 256;
+    // The upstream PSOLA implementation is designed for analysis frames
+    // around 50 ms; 256-sample host blocks are too short for its mark scheduler.
+    constexpr int frameSize = 2048;
     const int maxPeriod = static_cast<int>(std::ceil(sampleRate / 65.0));
     const int period = static_cast<int>(std::lround(sampleRate / frequency));
     const double expectedOutput = frequency * std::pow(2.0, semitones / 12.0);
