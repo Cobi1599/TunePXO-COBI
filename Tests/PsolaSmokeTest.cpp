@@ -499,6 +499,34 @@ bool testStereoPsola()
     return std::abs(leftError) <= 35.0 && std::abs(rightError) <= 35.0;
 }
 
+bool testAdapterAveragesControlsAcrossHostBlocks()
+{
+    constexpr double sampleRate = 48000.0;
+    PsolaRealtimeAdapter adapter;
+    adapter.prepare(sampleRate);
+    juce::AudioBuffer<float> storage(2, 512);
+    storage.clear();
+
+    // Split one PSOLA frame across two host blocks with different controls.
+    juce::AudioBuffer<float> first(storage.getArrayOfWritePointers(), 2, 512);
+    adapter.process(first, 200, -2.0);
+    juce::AudioBuffer<float> second(storage.getArrayOfWritePointers(), 2, 512);
+    adapter.process(second, 100, 6.0);
+
+    const int expectedPeriod = static_cast<int>(std::lround(
+        1.0 / (0.5 / 200.0 + 0.5 / 100.0)));
+    const double expectedShift = 2.0;
+    const bool passed = adapter.getLastProcessedPeriod() == expectedPeriod
+        && std::abs(adapter.getLastProcessedSemitones() - expectedShift) < 1.0e-9
+        && adapter.getUnderflows() == 0 && adapter.getOverflows() == 0;
+
+    std::cout << "Adapter control averaging: period="
+              << adapter.getLastProcessedPeriod() << " (expected " << expectedPeriod
+              << "), shift=" << adapter.getLastProcessedSemitones()
+              << " (expected " << expectedShift << "), passed=" << passed << std::endl;
+    return passed;
+}
+
 bool testProductionAdapter()
 {
     constexpr double sampleRate = 48000.0;
@@ -670,10 +698,11 @@ int main()
     const bool stereoPsola = testStereoPsola();
     const bool variableBlocks = testVariableHostBlocks();
     const bool productionAdapter = testProductionAdapter();
+    const bool adapterControlAveraging = testAdapterAveragesControlsAcrossHostBlocks();
 
     if (!shiftedVoice1024 || !shiftedVoice2048 || !shiftedVoice4096 || !unshiftedLowVoice
         || !lowVoiceDown || !midVoiceUp || !highVoiceDown || !highVoiceUp
-        || impulsePeak < 0 || !adapterImpulseTests || !pitchGlide || !fastPitchGlide || !stereoPsola || !variableBlocks || !productionAdapter)
+        || impulsePeak < 0 || !adapterImpulseTests || !pitchGlide || !fastPitchGlide || !stereoPsola || !variableBlocks || !productionAdapter || !adapterControlAveraging)
     {
         std::cerr << "PSOLA quality test failed: shifted2048=" << shiftedVoice2048
                   << ", shifted1024=" << shiftedVoice1024 << ", shifted2048=" << shiftedVoice2048
