@@ -46,6 +46,8 @@ private:
     static constexpr int pitchWindowSize = 512;
     PsolaRealtimeAdapter psola;
     juce::AudioBuffer<float> psolaScratch;
+    juce::AudioBuffer<float> legacyScratch;
+    float engineCrossfade = 1.0f;
     static constexpr int dryRingSize = 16384;
     std::array<std::array<float, dryRingSize>, 2> psolaDryRing {};
     int dryWritePosition = 0;
