@@ -300,20 +300,27 @@ bool testPitchGlide()
     double phase = 0.0;
     bool allFinite = true;
 
-    // Sweep the input pitch, then hold the final note so the measurement
+    // Smoothly sweep the input pitch sample-by-sample, then hold the final note so the measurement
     // evaluates steady-state tracking rather than averaging the whole glide.
     for (int block = 0; block < glideFrames + settleFrames; ++block)
     {
-        const double progress = static_cast<double>(std::min(block, glideFrames - 1))
-            / static_cast<double>(glideFrames - 1);
-        const double frequency = block < glideFrames
-            ? startFrequency + (endFrequency - startFrequency) * progress
+        const double blockProgress = static_cast<double>(block) / static_cast<double>(glideFrames);
+        const double nextProgress = static_cast<double>(block + 1) / static_cast<double>(glideFrames);
+        const double blockStartFrequency = block < glideFrames
+            ? startFrequency + (endFrequency - startFrequency) * blockProgress
             : endFrequency;
-        const int period = static_cast<int>(std::lround(sampleRate / frequency));
-        const double phaseStep = juce::MathConstants<double>::twoPi * frequency / sampleRate;
+        const double blockEndFrequency = block < glideFrames
+            ? startFrequency + (endFrequency - startFrequency) * nextProgress
+            : endFrequency;
+        const double averageFrequency = 0.5 * (blockStartFrequency + blockEndFrequency);
+        const int period = static_cast<int>(std::lround(sampleRate / averageFrequency));
         auto* samples = frame.getWritePointer(0);
         for (int i = 0; i < frameSize; ++i)
         {
+            const double sampleProgress = static_cast<double>(i) / static_cast<double>(frameSize);
+            const double frequency = blockStartFrequency
+                + (blockEndFrequency - blockStartFrequency) * sampleProgress;
+            const double phaseStep = juce::MathConstants<double>::twoPi * frequency / sampleRate;
             samples[i] = 0.45f * static_cast<float>(std::sin(phase));
             phase += phaseStep;
             if (phase >= juce::MathConstants<double>::twoPi)
