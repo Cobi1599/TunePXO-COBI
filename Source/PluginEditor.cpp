@@ -22,6 +22,7 @@ TunePXOCobiAudioProcessorEditor::TunePXOCobiAudioProcessorEditor(TunePXOCobiAudi
 
     styleLabel(title, "TunePXO", 31.0f, white);
     styleLabel(subtitle, "COBI  /  VOCAL TUNING SYSTEM", 11.0f, purple);
+    styleLabel(engineLabel, "PITCH ENGINE", 10.5f, muted);
     styleLabel(modeLabel, "TUNING STYLE", 10.5f, muted);
     styleLabel(keyLabel, "KEY", 10.5f, muted);
     styleLabel(scaleLabel, "SCALE", 10.5f, muted);
@@ -32,16 +33,18 @@ TunePXOCobiAudioProcessorEditor::TunePXOCobiAudioProcessorEditor(TunePXOCobiAudi
     styleLabel(pitchValue, "--", 34.0f, white);
     styleLabel(status, "REAL-TIME PITCH DETECTION + CORRECTION ENGINE  /  BETA", 9.5f, muted, false);
 
-    for (auto* c : { &title, &subtitle, &modeLabel, &keyLabel, &scaleLabel, &retuneLabel,
+    for (auto* c : { &title, &subtitle, &engineLabel, &modeLabel, &keyLabel, &scaleLabel, &retuneLabel,
                      &humanizeLabel, &mixLabel, &pitchCaption, &pitchValue, &status })
         addAndMakeVisible(*c);
 
+    engineBox.addItem("LEGACY", 1);
+    engineBox.addItem("PSOLA", 2);
     modeBox.addItem("NATURAL", 1);
     modeBox.addItem("HARD TUNE", 2);
     keyBox.addItemList(juce::StringArray{ "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" }, 1);
     scaleBox.addItemList(juce::StringArray{ "Major", "Minor", "Chromatic" }, 1);
 
-    for (auto* c : { &modeBox, &keyBox, &scaleBox }) {
+    for (auto* c : { &engineBox, &modeBox, &keyBox, &scaleBox }) {
         c->setColour(juce::ComboBox::backgroundColourId, card2);
         c->setColour(juce::ComboBox::textColourId, white);
         c->setColour(juce::ComboBox::outlineColourId, purple);
@@ -66,6 +69,7 @@ TunePXOCobiAudioProcessorEditor::TunePXOCobiAudioProcessorEditor(TunePXOCobiAudi
     setupSlider(mixSlider);
 
     auto& state = audioProcessor.parameters;
+    engineAttachment = std::make_unique<ComboAttachment>(state, "ENGINE", engineBox);
     modeAttachment = std::make_unique<ComboAttachment>(state, "MODE", modeBox);
     keyAttachment = std::make_unique<ComboAttachment>(state, "KEY", keyBox);
     scaleAttachment = std::make_unique<ComboAttachment>(state, "SCALE", scaleBox);
@@ -143,12 +147,14 @@ void TunePXOCobiAudioProcessorEditor::resized()
     title.setBounds(panelX, 18, 300, 42);
     subtitle.setBounds(panelX + 3, 58, 320, 20);
 
-    modeLabel.setBounds(panelX + 2, 124, 130, 18);
-    modeBox.setBounds(panelX, 146, 190, 36);
-    keyLabel.setBounds(panelX + 220, 124, 80, 18);
-    keyBox.setBounds(panelX + 218, 146, 125, 36);
-    scaleLabel.setBounds(panelX + 370, 124, 90, 18);
-    scaleBox.setBounds(panelX + 368, 146, 155, 36);
+    engineLabel.setBounds(panelX + 2, 124, 130, 18);
+    engineBox.setBounds(panelX, 146, 145, 36);
+    modeLabel.setBounds(panelX + 165, 124, 130, 18);
+    modeBox.setBounds(panelX + 163, 146, 175, 36);
+    keyLabel.setBounds(panelX + 355, 124, 80, 18);
+    keyBox.setBounds(panelX + 353, 146, 125, 36);
+    scaleLabel.setBounds(panelX + 495, 124, 90, 18);
+    scaleBox.setBounds(panelX + 493, 146, 155, 36);
 
     auto panelWidth = w - 96;
     auto third = panelWidth / 3;
