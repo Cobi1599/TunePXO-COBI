@@ -5,6 +5,7 @@
 namespace {
 constexpr float twoPi = juce::MathConstants<float>::twoPi;
 constexpr int analysisDecimation = 2;
+constexpr float pitchShiftDelayRange = 384.0f;
 constexpr int minPitchLag = 12;
 constexpr int maxPitchLag = 300;
 constexpr float minimumCorrelation = 0.62f;
@@ -188,16 +189,14 @@ float TunePXOCobiAudioProcessor::processPitchShift(int channel, float input, flo
     line[(size_t)delayWritePosition] = input;
 
     constexpr float minDelay = 48.0f;
-    constexpr float delayRange = 256.0f;
     ratio = juce::jlimit(0.5f, 2.0f, ratio);
-    const float phaseStep = (1.0f - ratio) / delayRange;
 
     float phaseA = shifterPhase;
     float phaseB = phaseA + 0.5f;
     if (phaseB >= 1.0f) phaseB -= 1.0f;
 
-    const float delayA = minDelay + phaseA * delayRange;
-    const float delayB = minDelay + phaseB * delayRange;
+    const float delayA = minDelay + phaseA * pitchShiftDelayRange;
+    const float delayB = minDelay + phaseB * pitchShiftDelayRange;
     const float weightA = 0.5f - 0.5f * std::cos(twoPi * phaseA);
     const float weightB = 1.0f - weightA;
     const float shifted = readDelay(channel, delayA) * weightA + readDelay(channel, delayB) * weightB;
@@ -206,7 +205,6 @@ float TunePXOCobiAudioProcessor::processPitchShift(int channel, float input, flo
     const float correctionAmount = std::abs(1.0f - ratio);
     const float wetAmount = juce::jlimit(0.0f, 1.0f,
         (correctionAmount - 0.0005f) / 0.0025f);
-    juce::ignoreUnused(phaseStep);
     return input + (shifted - input) * wetAmount;
 }
 
@@ -312,7 +310,7 @@ void TunePXOCobiAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, j
             right[i] = dryRight + (wetRight - dryRight) * mix;
         }
 
-        shifterPhase += (1.0f - ratio) / 256.0f;
+        shifterPhase += (1.0f - ratio) / pitchShiftDelayRange;
         if (shifterPhase >= 1.0f) shifterPhase -= 1.0f;
         if (shifterPhase < 0.0f) shifterPhase += 1.0f;
         delayWritePosition = (delayWritePosition + 1) % delayBufferSize;
