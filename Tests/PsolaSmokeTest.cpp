@@ -280,6 +280,63 @@ bool testVariableHostBlocks()
     return psolaPassed && identityPassed;
 }
 
+bool testPitchGlide()
+{
+    constexpr double sampleRate = 44100.0;
+    constexpr int frameSize = 1024;
+    constexpr int totalFrames = 240;
+    constexpr double startFrequency = 180.0;
+    constexpr double endFrequency = 280.0;
+    constexpr double shiftSemitones = -3.0;
+    const int maxPeriod = static_cast<int>(std::ceil(sampleRate / 65.0));
+
+    TD_pitch_shift::Sola processor(1, frameSize, maxPeriod);
+    juce::AudioBuffer<float> frame(1, frameSize);
+    std::vector<float> finalSegment;
+    finalSegment.reserve(32 * frameSize);
+    double phase = 0.0;
+    bool allFinite = true;
+
+    for (int block = 0; block < totalFrames; ++block)
+    {
+        const double progress = static_cast<double>(block) / (totalFrames - 1);
+        const double frequency = startFrequency + (endFrequency - startFrequency) * progress;
+        const int period = static_cast<int>(std::lround(sampleRate / frequency));
+        const double phaseStep = juce::MathConstants<double>::twoPi * frequency / sampleRate;
+        auto* samples = frame.getWritePointer(0);
+        for (int i = 0; i < frameSize; ++i)
+        {
+            samples[i] = 0.45f * static_cast<float>(std::sin(phase));
+            phase += phaseStep;
+            if (phase >= juce::MathConstants<double>::twoPi)
+                phase -= juce::MathConstants<double>::twoPi;
+        }
+
+        processor.Process(frame, period, shiftSemitones);
+        for (int i = 0; i < frameSize; ++i)
+        {
+            allFinite = allFinite && std::isfinite(samples[i]);
+            if (block >= totalFrames - 32)
+                finalSegment.push_back(samples[i]);
+        }
+    }
+
+    const double expected = endFrequency * std::pow(2.0, shiftSemitones / 12.0);
+    const double measured = estimateFrequency(finalSegment, sampleRate, expected);
+    const double errorCents = measured > 0.0
+        ? 1200.0 * std::log2(measured / expected) : 10000.0;
+    double energy = 0.0;
+    for (float sample : finalSegment)
+        energy += static_cast<double>(sample) * sample;
+
+    std::cout << "PSOLA glide " << startFrequency << "->" << endFrequency
+              << " Hz, final expected=" << expected << " Hz, measured="
+              << measured << " Hz, error=" << errorCents
+              << " cents, finite=" << allFinite << std::endl;
+    return allFinite && energy / finalSegment.size() > 1.0e-6
+        && std::abs(errorCents) <= 35.0;
+}
+
 bool testStereoPsola()
 {
     constexpr double sampleRate = 44100.0;
@@ -501,19 +558,20 @@ int main()
             adapterImpulseTests = (measureProductionAdapterImpulsePeak(rate, shift) > 0)
                                && adapterImpulseTests;
     std::cout << "Adapter latency matrix passed=" << adapterImpulseTests << std::endl;
+    const bool pitchGlide = testPitchGlide();
     const bool stereoPsola = testStereoPsola();
     const bool variableBlocks = testVariableHostBlocks();
     const bool productionAdapter = testProductionAdapter();
 
     if (!shiftedVoice1024 || !shiftedVoice2048 || !shiftedVoice4096 || !unshiftedLowVoice
         || !lowVoiceDown || !midVoiceUp || !highVoiceDown || !highVoiceUp
-        || impulsePeak < 0 || !adapterImpulseTests || !stereoPsola || !variableBlocks || !productionAdapter)
+        || impulsePeak < 0 || !adapterImpulseTests || !pitchGlide || !stereoPsola || !variableBlocks || !productionAdapter)
     {
         std::cerr << "PSOLA quality test failed: shifted2048=" << shiftedVoice2048
                   << ", shifted1024=" << shiftedVoice1024 << ", shifted2048=" << shiftedVoice2048
                   << ", shifted4096=" << shiftedVoice4096 << ", unshiftedLowVoice=" << unshiftedLowVoice
                   << ", impulsePeak=" << impulsePeak << ", adapterImpulseTests=" << adapterImpulseTests << ", stereoPsola=" << stereoPsola
-                  << ", variableBlocks=" << variableBlocks << ", productionAdapter=" << productionAdapter << std::endl;
+                  << ", pitchGlide=" << pitchGlide << ", variableBlocks=" << variableBlocks << ", productionAdapter=" << productionAdapter << std::endl;
         return 1;
     }
 
