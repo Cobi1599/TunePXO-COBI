@@ -419,9 +419,12 @@ bool testFastPitchGlide()
 
     const double expected = endFrequency * std::pow(2.0, shiftSemitones / 12.0);
     const double measured = estimateFrequency(settledSegment, sampleRate, expected);
+    // The spectral estimate covers all eight captured frames, so compare it
+    // with the midpoint frequency of that window rather than its first frame.
+    const double trackingWindowMidpoint = static_cast<double>(glideFrames - 4.5);
     const double trackingExpectedInput = startFrequency
         + (endFrequency - startFrequency)
-            * (static_cast<double>(glideFrames - 8) / static_cast<double>(glideFrames - 1));
+            * (trackingWindowMidpoint / static_cast<double>(glideFrames - 1));
     const double trackingExpected = trackingExpectedInput * std::pow(2.0, shiftSemitones / 12.0);
     const double trackingMeasured = estimateFrequency(trackingSegment, sampleRate, trackingExpected);
     const double trackingErrorCents = trackingMeasured > 0.0
