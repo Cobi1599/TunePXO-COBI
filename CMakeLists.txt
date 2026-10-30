@@ -62,3 +62,27 @@ target_link_libraries(PsolaSmokeTest PRIVATE
     juce::juce_recommended_warning_flags
 )
 add_test(NAME PsolaSmokeTest COMMAND PsolaSmokeTest)
+
+
+# Exercise the complete AudioProcessor paths, including host-reported latency.
+add_executable(ProcessorIntegrationTest
+    Tests/ProcessorIntegrationTest.cpp
+    Source/PluginProcessor.cpp
+    Source/PluginEditor.cpp
+    ThirdParty/psola/sola.cpp
+)
+juce_generate_juce_header(ProcessorIntegrationTest)
+target_include_directories(ProcessorIntegrationTest PRIVATE Source ThirdParty/psola)
+target_compile_features(ProcessorIntegrationTest PRIVATE cxx_std_17)
+target_compile_definitions(ProcessorIntegrationTest PRIVATE
+    JUCE_WEB_BROWSER=0
+    JUCE_USE_CURL=0
+    JUCE_VST3_CAN_REPLACE_VST2=0
+)
+target_link_libraries(ProcessorIntegrationTest PRIVATE
+    juce::juce_audio_utils
+    juce::juce_dsp
+    juce::juce_recommended_config_flags
+    juce::juce_recommended_warning_flags
+)
+add_test(NAME ProcessorIntegrationTest COMMAND ProcessorIntegrationTest)
