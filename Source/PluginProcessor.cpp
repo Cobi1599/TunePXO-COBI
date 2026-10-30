@@ -43,6 +43,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout TunePXOCobiAudioProcessor::c
 void TunePXOCobiAudioProcessor::prepareToPlay(double sampleRate, int)
 {
     psolaScratch.setSize(2, 131072, false, true, false);
+    legacyScratch.setSize(2, 131072, false, true, false);
+    engineCrossfade = 1.0f;
     currentSampleRate = sampleRate > 0.0 ? sampleRate : 44100.0;
     psola.prepare(currentSampleRate);
     for (auto& channel : psolaDryRing) channel.fill(0.0f);
@@ -359,10 +361,8 @@ void TunePXOCobiAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, j
         legacyLatencyRing[0][(size_t)legacyLatencyWritePosition] = legacyLeft;
         legacyLatencyRing[1][(size_t)legacyLatencyWritePosition] = legacyRight;
         const int legacyRead = (legacyLatencyWritePosition - psolaLatencySamples + dryRingSize) % dryRingSize;
-        if (engine == 0) {
-            left[i] = legacyLatencyRing[0][(size_t)legacyRead];
-            if (right != nullptr) right[i] = legacyLatencyRing[1][(size_t)legacyRead];
-        }
+        legacyScratch.setSample(0, i, legacyLatencyRing[0][(size_t)legacyRead]);
+        legacyScratch.setSample(1, i, legacyLatencyRing[1][(size_t)legacyRead]);
         legacyLatencyWritePosition = (legacyLatencyWritePosition + 1) % dryRingSize;
     }
     // Keep PSOLA's overlap/FIFO state warm using the untouched input snapshot.
@@ -375,22 +375,37 @@ void TunePXOCobiAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, j
         if (measuredPeriod > 0) lastPsolaPeriod = measuredPeriod;
         psola.process(psolaBlock, lastPsolaPeriod, (double)smoothedCorrectionSemitones);
 
-        if (engine == 1) {
-            for (int i = 0; i < numSamples; ++i) {
-                left[i] = psolaScratch.getSample(0, i);
-                if (right != nullptr) right[i] = psolaScratch.getSample(1, i);
-                if (mix < 0.9999f) {
-                    int read = (dryBlockStart + i - psolaLatencySamples) % dryRingSize;
-                    if (read < 0) read += dryRingSize;
-                    const float dryL = psolaDryRing[0][(size_t)read];
-                    left[i] = dryL + (left[i] - dryL) * mix;
-                    if (right != nullptr) {
-                        const float dryR = psolaDryRing[1][(size_t)read];
-                        right[i] = dryR + (right[i] - dryR) * mix;
-                    }
-                }
+    }
+
+    // Crossfade between latency-aligned engines over 5 ms. Both engines run
+    // continuously, so this avoids a discontinuity when the selector changes.
+    const float targetEngineBlend = (engine == 1 && canProcessPsolaBlock) ? 1.0f : 0.0f;
+    const float crossfadeStep = 1.0f / juce::jmax(1.0f, 0.005f * (float)currentSampleRate);
+    for (int i = 0; i < numSamples; ++i) {
+        if (engineCrossfade < targetEngineBlend)
+            engineCrossfade = juce::jmin(targetEngineBlend, engineCrossfade + crossfadeStep);
+        else if (engineCrossfade > targetEngineBlend)
+            engineCrossfade = juce::jmax(targetEngineBlend, engineCrossfade - crossfadeStep);
+
+        float psolaLeft = legacyScratch.getSample(0, i);
+        float psolaRight = legacyScratch.getSample(1, i);
+        if (canProcessPsolaBlock) {
+            psolaLeft = psolaScratch.getSample(0, i);
+            psolaRight = psolaScratch.getSample(1, i);
+            if (mix < 0.9999f) {
+                int read = (dryBlockStart + i - psolaLatencySamples) % dryRingSize;
+                if (read < 0) read += dryRingSize;
+                const float dryL = psolaDryRing[0][(size_t)read];
+                const float dryR = psolaDryRing[1][(size_t)read];
+                psolaLeft = dryL + (psolaLeft - dryL) * mix;
+                psolaRight = dryR + (psolaRight - dryR) * mix;
             }
         }
+        left[i] = legacyScratch.getSample(0, i)
+                + (psolaLeft - legacyScratch.getSample(0, i)) * engineCrossfade;
+        if (right != nullptr)
+            right[i] = legacyScratch.getSample(1, i)
+                     + (psolaRight - legacyScratch.getSample(1, i)) * engineCrossfade;
     }
 }
 juce::AudioProcessorEditor* TunePXOCobiAudioProcessor::createEditor()
