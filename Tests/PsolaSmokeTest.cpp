@@ -353,6 +353,9 @@ bool testProductionAdapter()
 
     double phase = 0.0;
     const double step = juce::MathConstants<double>::twoPi * frequency / sampleRate;
+    std::vector<float> leftCaptured, rightCaptured;
+    leftCaptured.reserve(totalSamples - 8192);
+    rightCaptured.reserve(totalSamples - 8192);
     int processed = 0;
     size_t blockIndex = 0;
     while (processed < totalSamples)
@@ -372,20 +375,72 @@ bool testProductionAdapter()
         // by processing a view-sized temporary without allocating in the adapter.
         juce::AudioBuffer<float> hostBlock(block.getArrayOfWritePointers(), 2, count);
         adapter.process(hostBlock, period, -5.0);
-        for (int ch = 0; ch < 2; ++ch)
-            for (int i = 0; i < count; ++i)
-                if (!std::isfinite(hostBlock.getSample(ch, i)))
-                    return false;
+        for (int i = 0; i < count; ++i)
+        {
+            const float outL = hostBlock.getSample(0, i);
+            const float outR = hostBlock.getSample(1, i);
+            if (!std::isfinite(outL) || !std::isfinite(outR))
+                return false;
+            if (processed + i >= 8192)
+            {
+                leftCaptured.push_back(outL);
+                rightCaptured.push_back(outR);
+            }
+        }
         processed += count;
     }
 
+    const double expected = frequency * std::pow(2.0, -5.0 / 12.0);
+    const double measuredLeft = estimateFrequency(leftCaptured, sampleRate, expected);
+    const double measuredRight = estimateFrequency(rightCaptured, sampleRate, expected);
+    const double errorLeft = 1200.0 * std::log2(measuredLeft / expected);
+    const double errorRight = 1200.0 * std::log2(measuredRight / expected);
+
     std::cout << "Production adapter: sampleRate=" << sampleRate
               << ", period=" << period
-              << ", reported FIFO latency=" << adapter.getLatencySamples()
+              << ", left=" << measuredLeft << " Hz (" << errorLeft << " cents)"
+              << ", right=" << measuredRight << " Hz (" << errorRight << " cents)"
+              << ", FIFO delay=" << adapter.getLatencySamples()
               << ", underflows=" << adapter.getUnderflows()
               << ", overflows=" << adapter.getOverflows() << std::endl;
     return adapter.getUnderflows() == 0 && adapter.getOverflows() == 0
-        && adapter.getLatencySamples() == 1024;
+        && adapter.getLatencySamples() == 1024
+        && std::abs(errorLeft) <= 35.0 && std::abs(errorRight) <= 35.0;
+}
+
+int measureProductionAdapterImpulsePeak()
+{
+    constexpr double sampleRate = 48000.0;
+    constexpr int totalSamples = 65536;
+    constexpr int blockSize = 256;
+    PsolaRealtimeAdapter adapter;
+    adapter.prepare(sampleRate);
+    juce::AudioBuffer<float> storage(2, blockSize);
+    int peakIndex = -1;
+    float peak = 0.0f;
+    int globalIndex = 0;
+    while (globalIndex < totalSamples)
+    {
+        const int count = std::min(blockSize, totalSamples - globalIndex);
+        storage.clear();
+        if (globalIndex == 0)
+            storage.setSample(0, 0, 1.0f);
+        juce::AudioBuffer<float> hostBlock(storage.getArrayOfWritePointers(), 2, count);
+        adapter.process(hostBlock, 218, -5.0);
+        for (int i = 0; i < count; ++i)
+        {
+            const float value = std::abs(hostBlock.getSample(0, i));
+            if (value > peak)
+            {
+                peak = value;
+                peakIndex = globalIndex + i;
+            }
+        }
+        globalIndex += count;
+    }
+    std::cout << "Production adapter impulse peak index=" << peakIndex
+              << " at 48 kHz, peak=" << peak << std::endl;
+    return peakIndex;
 }
 
 int measureImpulsePeak()
@@ -434,16 +489,17 @@ int main()
     const bool shiftedVoice4096 = runCase(44100.0, 220.0, -5.0, 4096);
     const bool unshiftedLowVoice = runCase(44100.0, 65.0, 0.0, 2048);
     const int impulsePeak = measureImpulsePeak();
+    const int adapterImpulsePeak = measureProductionAdapterImpulsePeak();
     const bool stereoPsola = testStereoPsola();
     const bool variableBlocks = testVariableHostBlocks();
     const bool productionAdapter = testProductionAdapter();
 
-    if (!shiftedVoice1024 || !shiftedVoice2048 || !shiftedVoice4096 || !unshiftedLowVoice || impulsePeak < 0 || !stereoPsola || !variableBlocks || !productionAdapter)
+    if (!shiftedVoice1024 || !shiftedVoice2048 || !shiftedVoice4096 || !unshiftedLowVoice || impulsePeak < 0 || adapterImpulsePeak < 0 || !stereoPsola || !variableBlocks || !productionAdapter)
     {
         std::cerr << "PSOLA quality test failed: shifted2048=" << shiftedVoice2048
                   << ", shifted1024=" << shiftedVoice1024 << ", shifted2048=" << shiftedVoice2048
                   << ", shifted4096=" << shiftedVoice4096 << ", unshiftedLowVoice=" << unshiftedLowVoice
-                  << ", impulsePeak=" << impulsePeak << ", stereoPsola=" << stereoPsola
+                  << ", impulsePeak=" << impulsePeak << ", adapterImpulsePeak=" << adapterImpulsePeak << ", stereoPsola=" << stereoPsola
                   << ", variableBlocks=" << variableBlocks << ", productionAdapter=" << productionAdapter << std::endl;
         return 1;
     }
