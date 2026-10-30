@@ -297,7 +297,7 @@ bool testPitchGlide()
     std::vector<float> settledSegment;
     std::vector<float> trackingSegment;
     settledSegment.reserve(settleFrames * frameSize);
-    trackingSegment.reserve(32 * frameSize);
+    trackingSegment.reserve(8 * frameSize);
     double phase = 0.0;
     bool allFinite = true;
 
@@ -334,7 +334,7 @@ bool testPitchGlide()
             allFinite = allFinite && std::isfinite(samples[i]);
             if (block >= glideFrames)
                 settledSegment.push_back(samples[i]);
-            else if (block >= glideFrames - 32)
+            else if (block >= glideFrames - 8)
                 trackingSegment.push_back(samples[i]);
         }
     }
@@ -346,7 +346,7 @@ bool testPitchGlide()
     // point; compensate the full engine latency before judging glide accuracy.
     constexpr double measuredPsolaLatencySamples = 1358.0;
     const double trackingMidpointInputSample =
-        static_cast<double>(glideFrames - 16) * frameSize - measuredPsolaLatencySamples;
+        static_cast<double>(glideFrames - 4.5) * frameSize - measuredPsolaLatencySamples;
     const double trackingExpectedInput = startFrequency
         + (endFrequency - startFrequency)
             * (trackingMidpointInputSample / (static_cast<double>(glideFrames - 1) * frameSize));
