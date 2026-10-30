@@ -458,6 +458,111 @@ bool testFastPitchGlide()
         && trackingMeasured > 0.0 && std::abs(trackingErrorCents) <= 35.0;
 }
 
+
+struct SinePhaseMeasurement
+{
+    double frequency = 0.0;
+    double phaseDifference = 0.0;
+    double coherence = 0.0;
+};
+
+SinePhaseMeasurement measureSinePhase(double frequency)
+{
+    constexpr double sampleRate = 44100.0;
+    constexpr int frameSize = 1024;
+    constexpr int warmupSamples = 32768;
+    constexpr int captureSamples = 16384;
+    const int maxPeriod = static_cast<int>(std::ceil(sampleRate / 65.0));
+    const int period = static_cast<int>(std::lround(sampleRate / frequency));
+    TD_pitch_shift::Sola processor(1, frameSize, maxPeriod);
+    juce::AudioBuffer<float> frame(1, frameSize);
+    std::vector<float> input;
+    std::vector<float> output;
+    input.reserve(warmupSamples + captureSamples);
+    output.reserve(warmupSamples + captureSamples);
+    double phase = 0.0;
+    const double step = juce::MathConstants<double>::twoPi * frequency / sampleRate;
+
+    for (int block = 0; block < (warmupSamples + captureSamples) / frameSize; ++block)
+    {
+        auto* samples = frame.getWritePointer(0);
+        for (int i = 0; i < frameSize; ++i)
+        {
+            const float value = 0.4f * static_cast<float>(std::sin(phase));
+            samples[i] = value;
+            input.push_back(value);
+            phase += step;
+            if (phase >= juce::MathConstants<double>::twoPi)
+                phase -= juce::MathConstants<double>::twoPi;
+        }
+        processor.Process(frame, period, 0.0);
+        for (int i = 0; i < frameSize; ++i)
+            output.push_back(frame.getSample(0, i));
+    }
+
+    double inReal = 0.0, inImag = 0.0, outReal = 0.0, outImag = 0.0;
+    const int begin = warmupSamples;
+    for (int i = 0; i < captureSamples; ++i)
+    {
+        const double angle = step * static_cast<double>(begin + i);
+        const double c = std::cos(angle), sn = std::sin(angle);
+        inReal += input[static_cast<size_t>(begin + i)] * c;
+        inImag -= input[static_cast<size_t>(begin + i)] * sn;
+        outReal += output[static_cast<size_t>(begin + i)] * c;
+        outImag -= output[static_cast<size_t>(begin + i)] * sn;
+    }
+    const double inputMagnitude = std::hypot(inReal, inImag);
+    const double outputMagnitude = std::hypot(outReal, outImag);
+    const double phaseDifference = std::atan2(outImag, outReal)
+        - std::atan2(inImag, inReal);
+    return { frequency, std::remainder(phaseDifference,
+        juce::MathConstants<double>::twoPi),
+        inputMagnitude > 0.0 ? outputMagnitude / inputMagnitude : 0.0 };
+}
+
+bool testSinusoidalDelayResponse()
+{
+    constexpr double sampleRate = 44100.0;
+    const std::array<double, 6> frequencies{ 97.0, 131.0, 173.0, 220.0, 317.0, 443.0 };
+    std::array<SinePhaseMeasurement, frequencies.size()> measurements{};
+    for (size_t i = 0; i < frequencies.size(); ++i)
+        measurements[i] = measureSinePhase(frequencies[i]);
+
+    // Find the common integer-sample delay that best explains the measured
+    // phase at every frequency. A single impulse peak cannot provide this
+    // cross-frequency phase/group-delay check.
+    double bestError = std::numeric_limits<double>::max();
+    int bestDelay = -1;
+    for (int delay = 0; delay <= 4096; ++delay)
+    {
+        double error = 0.0;
+        for (const auto& measurement : measurements)
+        {
+            const double predicted = -juce::MathConstants<double>::twoPi
+                * measurement.frequency * static_cast<double>(delay) / sampleRate;
+            const double residual = std::remainder(
+                measurement.phaseDifference - predicted,
+                juce::MathConstants<double>::twoPi);
+            error += measurement.coherence * residual * residual;
+        }
+        if (error < bestError)
+        {
+            bestError = error;
+            bestDelay = delay;
+        }
+    }
+
+    std::cout << "PSOLA zero-shift sinusoidal phase response:";
+    for (const auto& measurement : measurements)
+        std::cout << " " << measurement.frequency << "Hz:"
+                  << (measurement.phaseDifference * 180.0
+                      / juce::MathConstants<double>::pi)
+                  << "deg/gain" << measurement.coherence;
+    std::cout << "; best common phase-delay=" << bestDelay
+              << " samples, residual=" << bestError << std::endl;
+    return bestDelay >= 0 && std::isfinite(bestError);
+}
+
 bool testStereoPsola()
 {
     constexpr double sampleRate = 44100.0;
@@ -800,6 +905,7 @@ int main()
     std::cout << "Adapter latency matrix passed=" << adapterImpulseTests << std::endl;
     const bool pitchGlide = testPitchGlide();
     const bool fastPitchGlide = testFastPitchGlide();
+    const bool sinusoidalDelayResponse = testSinusoidalDelayResponse();
     const bool stereoPsola = testStereoPsola();
     const bool variableBlocks = testVariableHostBlocks();
     const bool productionAdapter = testProductionAdapter();
@@ -808,7 +914,7 @@ int main()
 
     if (!shiftedVoice1024 || !shiftedVoice2048 || !shiftedVoice4096 || !unshiftedLowVoice
         || !lowVoiceDown || !midVoiceUp || !highVoiceDown || !highVoiceUp
-        || impulsePeak < 0 || !adapterImpulseTests || !pitchGlide || !fastPitchGlide || !stereoPsola || !variableBlocks || !productionAdapter || !productionAdapterFastGlide || !adapterControlAveraging)
+        || impulsePeak < 0 || !adapterImpulseTests || !pitchGlide || !fastPitchGlide || !sinusoidalDelayResponse || !stereoPsola || !variableBlocks || !productionAdapter || !productionAdapterFastGlide || !adapterControlAveraging)
     {
         std::cerr << "PSOLA quality test failed: shifted2048=" << shiftedVoice2048
                   << ", shifted1024=" << shiftedVoice1024 << ", shifted2048=" << shiftedVoice2048
