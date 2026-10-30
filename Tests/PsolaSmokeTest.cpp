@@ -284,7 +284,8 @@ bool testPitchGlide()
 {
     constexpr double sampleRate = 44100.0;
     constexpr int frameSize = 1024;
-    constexpr int totalFrames = 240;
+    constexpr int glideFrames = 208;
+    constexpr int settleFrames = 32;
     constexpr double startFrequency = 180.0;
     constexpr double endFrequency = 280.0;
     constexpr double shiftSemitones = -3.0;
@@ -292,15 +293,20 @@ bool testPitchGlide()
 
     TD_pitch_shift::Sola processor(1, frameSize, maxPeriod);
     juce::AudioBuffer<float> frame(1, frameSize);
-    std::vector<float> finalSegment;
-    finalSegment.reserve(32 * frameSize);
+    std::vector<float> settledSegment;
+    settledSegment.reserve(settleFrames * frameSize);
     double phase = 0.0;
     bool allFinite = true;
 
-    for (int block = 0; block < totalFrames; ++block)
+    // Sweep the input pitch, then hold the final note so the measurement
+    // evaluates steady-state tracking rather than averaging the whole glide.
+    for (int block = 0; block < glideFrames + settleFrames; ++block)
     {
-        const double progress = static_cast<double>(block) / (totalFrames - 1);
-        const double frequency = startFrequency + (endFrequency - startFrequency) * progress;
+        const double progress = static_cast<double>(std::min(block, glideFrames - 1))
+            / static_cast<double>(glideFrames - 1);
+        const double frequency = block < glideFrames
+            ? startFrequency + (endFrequency - startFrequency) * progress
+            : endFrequency;
         const int period = static_cast<int>(std::lround(sampleRate / frequency));
         const double phaseStep = juce::MathConstants<double>::twoPi * frequency / sampleRate;
         auto* samples = frame.getWritePointer(0);
@@ -316,24 +322,24 @@ bool testPitchGlide()
         for (int i = 0; i < frameSize; ++i)
         {
             allFinite = allFinite && std::isfinite(samples[i]);
-            if (block >= totalFrames - 32)
-                finalSegment.push_back(samples[i]);
+            if (block >= glideFrames)
+                settledSegment.push_back(samples[i]);
         }
     }
 
     const double expected = endFrequency * std::pow(2.0, shiftSemitones / 12.0);
-    const double measured = estimateFrequency(finalSegment, sampleRate, expected);
+    const double measured = estimateFrequency(settledSegment, sampleRate, expected);
     const double errorCents = measured > 0.0
         ? 1200.0 * std::log2(measured / expected) : 10000.0;
     double energy = 0.0;
-    for (float sample : finalSegment)
+    for (float sample : settledSegment)
         energy += static_cast<double>(sample) * sample;
 
     std::cout << "PSOLA glide " << startFrequency << "->" << endFrequency
-              << " Hz, final expected=" << expected << " Hz, measured="
+              << " Hz then hold, expected=" << expected << " Hz, measured="
               << measured << " Hz, error=" << errorCents
               << " cents, finite=" << allFinite << std::endl;
-    return allFinite && energy / finalSegment.size() > 1.0e-6
+    return allFinite && energy / settledSegment.size() > 1.0e-6
         && std::abs(errorCents) <= 35.0;
 }
 
