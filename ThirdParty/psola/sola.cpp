@@ -143,7 +143,7 @@ void Sola::Process(juce::AudioBuffer<float>& frame, int currentFramePeriod, doub
 
             if(mPrevFrameEndOffset >= nextSynthesisOffset) {
                 const double stretchRatio = std::pow(2.0, -semitones / 12.0);
-                synthesisPeriod = static_cast<int>(currentFramePeriod * stretchRatio);
+                synthesisPeriod = static_cast<int>(std::lround(currentFramePeriod * stretchRatio));
             }
             nextSynthesisOffset -= synthesisPeriod;
         }
