@@ -30,6 +30,9 @@ jobs:
       - name: Build PSOLA smoke test
         run: cmake --build build --config Release --target PsolaSmokeTest
 
+      - name: Run PSOLA latency measurement
+        run: .\build\Release\PsolaSmokeTest.exe
+
       - name: Run PSOLA smoke test
         run: ctest --test-dir build -C Release --output-on-failure
 
