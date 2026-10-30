@@ -45,6 +45,7 @@ private:
 
     static constexpr int pitchWindowSize = 512;
     PsolaRealtimeAdapter psola;
+    juce::AudioBuffer<float> psolaScratch;
     static constexpr int dryRingSize = 16384;
     std::array<std::array<float, dryRingSize>, 2> psolaDryRing {};
     int dryWritePosition = 0;
