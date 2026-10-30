@@ -340,9 +340,15 @@ bool testPitchGlide()
 
     const double expected = endFrequency * std::pow(2.0, shiftSemitones / 12.0);
     const double measured = estimateFrequency(settledSegment, sampleRate, expected);
+    // PSOLA's isolated engine impulse peak is 1358 samples at 44.1 kHz.
+    // The output tracking window therefore corresponds to an earlier input
+    // point; compensate the full engine latency before judging glide accuracy.
+    constexpr double measuredPsolaLatencySamples = 1358.0;
+    const double trackingMidpointInputSample =
+        static_cast<double>(glideFrames - 16) * frameSize - measuredPsolaLatencySamples;
     const double trackingExpectedInput = startFrequency
         + (endFrequency - startFrequency)
-            * (static_cast<double>(glideFrames - 16) / static_cast<double>(glideFrames - 1));
+            * (trackingMidpointInputSample / (static_cast<double>(glideFrames - 1) * frameSize));
     const double trackingExpected = trackingExpectedInput * std::pow(2.0, shiftSemitones / 12.0);
     const double trackingMeasured = estimateFrequency(trackingSegment, sampleRate, trackingExpected);
     const double trackingErrorCents = trackingMeasured > 0.0
@@ -421,10 +427,15 @@ bool testFastPitchGlide()
     const double measured = estimateFrequency(settledSegment, sampleRate, expected);
     // The spectral estimate covers all eight captured frames, so compare it
     // with the midpoint frequency of that window rather than its first frame.
-    const double trackingWindowMidpoint = static_cast<double>(glideFrames - 4.5);
+    // Compensate the isolated PSOLA engine's measured 1358-sample
+    // impulse latency so the spectral window is compared to its source time.
+    constexpr double measuredPsolaLatencySamples = 1358.0;
+    const double trackingWindowMidpointSamples =
+        static_cast<double>(glideFrames - 4.5) * frameSize - measuredPsolaLatencySamples;
     const double trackingExpectedInput = startFrequency
         + (endFrequency - startFrequency)
-            * (trackingWindowMidpoint / static_cast<double>(glideFrames - 1));
+            * (trackingWindowMidpointSamples
+               / (static_cast<double>(glideFrames - 1) * frameSize));
     const double trackingExpected = trackingExpectedInput * std::pow(2.0, shiftSemitones / 12.0);
     const double trackingMeasured = estimateFrequency(trackingSegment, sampleRate, trackingExpected);
     const double trackingErrorCents = trackingMeasured > 0.0
