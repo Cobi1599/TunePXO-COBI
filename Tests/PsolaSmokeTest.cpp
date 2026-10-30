@@ -616,6 +616,9 @@ bool testProductionAdapterFastGlide()
     juce::AudioBuffer<float> storage(2, blockSize);
     std::vector<float> captured;
     captured.reserve(holdSamples);
+    std::vector<float> glideTail;
+    constexpr int glideWindowSamples = 8192;
+    glideTail.reserve(glideWindowSamples);
     double phase = 0.0;
     int globalSample = 0;
     int previousPeriod = 0;
@@ -649,6 +652,14 @@ bool testProductionAdapterFastGlide()
         if (globalSample >= warmupSamples + glideSamples)
             for (int i = 0; i < count; ++i)
                 captured.push_back(hostBlock.getSample(0, i));
+        const int glideTailStart = warmupSamples + glideSamples - glideWindowSamples;
+        for (int i = 0; i < count; ++i)
+        {
+            const int absoluteSample = globalSample + i;
+            if (absoluteSample >= glideTailStart
+                && absoluteSample < warmupSamples + glideSamples)
+                glideTail.push_back(hostBlock.getSample(0, i));
+        }
         if (globalSample >= warmupSamples && globalSample < warmupSamples + glideSamples)
         {
             const int processedPeriod = adapter.getLastProcessedPeriod();
@@ -661,12 +672,20 @@ bool testProductionAdapterFastGlide()
     }
     const double measured = estimateFrequency(captured, sampleRate, 280.0);
     const double errorCents = 1200.0 * std::log2(measured / 280.0);
-    std::cout << "Production adapter fast glide 180->280 Hz, hold measured="
+    const double glideMidpointInput = 180.0 + 100.0
+        * (static_cast<double>(glideSamples - glideWindowSamples / 2 - adapter.getLatencySamples())
+           / static_cast<double>(glideSamples));
+    const double glideMeasured = estimateFrequency(glideTail, sampleRate, glideMidpointInput);
+    const double glideErrorCents = 1200.0 * std::log2(glideMeasured / glideMidpointInput);
+    std::cout << "Production adapter fast glide tail expected=" << glideMidpointInput
+              << " Hz, measured=" << glideMeasured << " Hz, error="
+              << glideErrorCents << " cents; hold measured="
               << measured << " Hz, error=" << errorCents
               << " cents, finalPeriod=" << adapter.getLastProcessedPeriod()
               << ", underflows=" << adapter.getUnderflows()
               << ", overflows=" << adapter.getOverflows() << std::endl;
-    return std::isfinite(measured) && std::abs(errorCents) <= 35.0
+    return std::isfinite(measured) && std::isfinite(glideMeasured)
+        && std::abs(glideErrorCents) <= 65.0 && std::abs(errorCents) <= 35.0
         && controlsMonotonic && adapter.getUnderflows() == 0
         && adapter.getOverflows() == 0;
 }
