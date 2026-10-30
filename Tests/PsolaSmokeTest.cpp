@@ -612,8 +612,9 @@ bool testAbruptControlTransitions()
     double worstPeakStep = 0.0;
     double worstRmsStep = 0.0;
     double worstPeakToRms = 0.0;
-    for (int transition : transitionFrames)
+    for (size_t transitionIndex = 0; transitionIndex < std::size(transitionFrames); ++transitionIndex)
     {
+        const int transition = transitionFrames[transitionIndex];
         const int expected = transition * frameSize + 1358;
         const int begin = std::max(1, expected - 2 * frameSize);
         const int end = std::min(static_cast<int>(output.size()) - 1,
@@ -635,7 +636,7 @@ bool testAbruptControlTransitions()
         worstRmsStep = std::max(worstRmsStep, rmsStep);
         worstPeakToRms = std::max(worstPeakToRms, ratio);
         std::cout << "PSOLA abrupt control transition frame=" << transition
-                  << ", shift " << shifts[(&transition - transitionFrames)] 
+                  << ", new-shift=" << shifts[transitionIndex + 1] 
                   << ", peak-step=" << peakStep << ", local-rms-step=" << rmsStep
                   << ", peak/rms=" << ratio << std::endl;
     }
