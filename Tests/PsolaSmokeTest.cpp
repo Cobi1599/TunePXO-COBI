@@ -576,9 +576,13 @@ bool testAbruptControlTransitions()
     const int period = static_cast<int>(std::lround(sampleRate / inputFrequency));
 
     TD_pitch_shift::Sola processor(1, frameSize, maxPeriod);
+    TD_pitch_shift::Sola baselineProcessor(1, frameSize, maxPeriod);
     juce::AudioBuffer<float> frame(1, frameSize);
+    juce::AudioBuffer<float> baselineFrame(1, frameSize);
     std::vector<float> output;
+    std::vector<float> baselineOutput;
     output.reserve(totalFrames * frameSize);
+    baselineOutput.reserve(totalFrames * frameSize);
     double phase = 0.0;
     bool allFinite = true;
 
@@ -590,28 +594,36 @@ bool testAbruptControlTransitions()
                 ++state;
 
         auto* samples = frame.getWritePointer(0);
+        auto* baselineSamples = baselineFrame.getWritePointer(0);
         for (int i = 0; i < frameSize; ++i)
         {
-            samples[i] = 0.4f * static_cast<float>(std::sin(phase));
+            const float input = 0.4f * static_cast<float>(std::sin(phase));
+            samples[i] = input;
+            baselineSamples[i] = input;
             phase += juce::MathConstants<double>::twoPi * inputFrequency / sampleRate;
             if (phase >= juce::MathConstants<double>::twoPi)
                 phase -= juce::MathConstants<double>::twoPi;
         }
 
         processor.Process(frame, period, shifts[state]);
+        // Constant -5 semitones provides a same-signal, same-engine reference
+        // with no automation edge. This separates ordinary PSOLA waveform
+        // slopes from extra discontinuities caused by abrupt control changes.
+        baselineProcessor.Process(baselineFrame, period, -5.0);
         for (int i = 0; i < frameSize; ++i)
         {
-            allFinite = allFinite && std::isfinite(samples[i]);
+            allFinite = allFinite && std::isfinite(samples[i])
+                && std::isfinite(baselineSamples[i]);
             output.push_back(samples[i]);
+            baselineOutput.push_back(baselineSamples[i]);
         }
     }
 
-    // PSOLA's measured engine delay is about 1358 samples. Inspect a generous
-    // region around each expected transition and compare its largest sample
-    // step with the typical local slope of the same waveform.
     double worstPeakStep = 0.0;
     double worstRmsStep = 0.0;
-    double worstPeakToRms = 0.0;
+    double worstBaselinePeakStep = 0.0;
+    double worstBaselineRmsStep = 0.0;
+    double worstPeakToBaseline = 0.0;
     for (size_t transitionIndex = 0; transitionIndex < std::size(transitionFrames); ++transitionIndex)
     {
         const int transition = transitionFrames[transitionIndex];
@@ -620,32 +632,47 @@ bool testAbruptControlTransitions()
         const int end = std::min(static_cast<int>(output.size()) - 1,
                                  expected + 2 * frameSize);
         double sumSquares = 0.0;
+        double baselineSumSquares = 0.0;
         double peakStep = 0.0;
+        double baselinePeakStep = 0.0;
         int count = 0;
         for (int i = begin; i < end; ++i)
         {
             const double step = std::abs(static_cast<double>(output[static_cast<size_t>(i)])
                                         - output[static_cast<size_t>(i - 1)]);
+            const double baselineStep = std::abs(
+                static_cast<double>(baselineOutput[static_cast<size_t>(i)])
+                - baselineOutput[static_cast<size_t>(i - 1)]);
             peakStep = std::max(peakStep, step);
+            baselinePeakStep = std::max(baselinePeakStep, baselineStep);
             sumSquares += step * step;
+            baselineSumSquares += baselineStep * baselineStep;
             ++count;
         }
         const double rmsStep = count > 0 ? std::sqrt(sumSquares / count) : 0.0;
-        const double ratio = rmsStep > 0.0 ? peakStep / rmsStep : 0.0;
+        const double baselineRmsStep = count > 0
+            ? std::sqrt(baselineSumSquares / count) : 0.0;
+        const double peakToBaseline = baselinePeakStep > 0.0
+            ? peakStep / baselinePeakStep : 0.0;
         worstPeakStep = std::max(worstPeakStep, peakStep);
         worstRmsStep = std::max(worstRmsStep, rmsStep);
-        worstPeakToRms = std::max(worstPeakToRms, ratio);
+        worstBaselinePeakStep = std::max(worstBaselinePeakStep, baselinePeakStep);
+        worstBaselineRmsStep = std::max(worstBaselineRmsStep, baselineRmsStep);
+        worstPeakToBaseline = std::max(worstPeakToBaseline, peakToBaseline);
         std::cout << "PSOLA abrupt control transition frame=" << transition
-                  << ", new-shift=" << shifts[transitionIndex + 1] 
+                  << ", new-shift=" << shifts[transitionIndex + 1]
                   << ", peak-step=" << peakStep << ", local-rms-step=" << rmsStep
-                  << ", peak/rms=" << ratio << std::endl;
+                  << ", baseline-peak-step=" << baselinePeakStep
+                  << ", baseline-rms-step=" << baselineRmsStep
+                  << ", peak/baseline=" << peakToBaseline << std::endl;
     }
 
-    std::cout << "PSOLA abrupt transition summary: finite=" << allFinite
+    std::cout << "PSOLA abrupt transition comparison: finite=" << allFinite
               << ", worst peak-step=" << worstPeakStep
-              << ", worst local-rms-step=" << worstRmsStep
-              << ", worst peak/rms=" << worstPeakToRms << std::endl;
-    return allFinite && worstPeakStep > 0.0 && std::isfinite(worstPeakToRms);
+              << ", worst baseline peak-step=" << worstBaselinePeakStep
+              << ", worst peak/baseline=" << worstPeakToBaseline << std::endl;
+    return allFinite && worstPeakStep > 0.0 && worstBaselinePeakStep > 0.0
+        && std::isfinite(worstPeakToBaseline);
 }
 
 bool testStereoPsola()
