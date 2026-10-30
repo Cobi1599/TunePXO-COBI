@@ -603,6 +603,74 @@ bool testProductionAdapter()
         && std::abs(errorLeft) <= 35.0 && std::abs(errorRight) <= 35.0;
 }
 
+
+bool testProductionAdapterFastGlide()
+{
+    constexpr double sampleRate = 48000.0;
+    constexpr int blockSize = 256;
+    constexpr int warmupSamples = 8192;
+    constexpr int glideSamples = 65536;
+    constexpr int holdSamples = 32768;
+    PsolaRealtimeAdapter adapter;
+    adapter.prepare(sampleRate);
+    juce::AudioBuffer<float> storage(2, blockSize);
+    std::vector<float> captured;
+    captured.reserve(holdSamples);
+    double phase = 0.0;
+    int globalSample = 0;
+    int previousPeriod = 0;
+    bool controlsMonotonic = true;
+    while (globalSample < warmupSamples + glideSamples + holdSamples)
+    {
+        const int count = std::min(blockSize,
+            warmupSamples + glideSamples + holdSamples - globalSample);
+        const int relative = globalSample - warmupSamples;
+        const double frequency = relative < 0 ? 180.0
+            : relative < glideSamples
+                ? 180.0 + 100.0 * static_cast<double>(relative) / glideSamples
+                : 280.0;
+        const int period = PsolaRealtimeAdapter::periodFromFrequency(sampleRate, frequency);
+        for (int i = 0; i < count; ++i)
+        {
+            const int samplePosition = relative + i;
+            const double inputFrequency = samplePosition < 0 ? 180.0
+                : samplePosition < glideSamples
+                    ? 180.0 + 100.0 * static_cast<double>(samplePosition) / glideSamples
+                    : 280.0;
+            const float sample = 0.3f * static_cast<float>(std::sin(phase));
+            storage.setSample(0, i, sample);
+            storage.setSample(1, i, sample);
+            phase += juce::MathConstants<double>::twoPi * inputFrequency / sampleRate;
+            if (phase >= juce::MathConstants<double>::twoPi)
+                phase -= juce::MathConstants<double>::twoPi;
+        }
+        juce::AudioBuffer<float> hostBlock(storage.getArrayOfWritePointers(), 2, count);
+        adapter.process(hostBlock, period, 0.0);
+        if (globalSample >= warmupSamples + glideSamples)
+            for (int i = 0; i < count; ++i)
+                captured.push_back(hostBlock.getSample(0, i));
+        if (globalSample >= warmupSamples && globalSample < warmupSamples + glideSamples)
+        {
+            const int processedPeriod = adapter.getLastProcessedPeriod();
+            if (processedPeriod > 0 && previousPeriod > 0 && processedPeriod > previousPeriod)
+                controlsMonotonic = false;
+            if (processedPeriod > 0)
+                previousPeriod = processedPeriod;
+        }
+        globalSample += count;
+    }
+    const double measured = estimateFrequency(captured, sampleRate, 280.0);
+    const double errorCents = 1200.0 * std::log2(measured / 280.0);
+    std::cout << "Production adapter fast glide 180->280 Hz, hold measured="
+              << measured << " Hz, error=" << errorCents
+              << " cents, finalPeriod=" << adapter.getLastProcessedPeriod()
+              << ", underflows=" << adapter.getUnderflows()
+              << ", overflows=" << adapter.getOverflows() << std::endl;
+    return std::isfinite(measured) && std::abs(errorCents) <= 35.0
+        && controlsMonotonic && adapter.getUnderflows() == 0
+        && adapter.getOverflows() == 0;
+}
+
 int measureProductionAdapterImpulsePeak(double sampleRate, double shift)
 {
     constexpr int totalSamples = 65536;
@@ -701,11 +769,12 @@ int main()
     const bool stereoPsola = testStereoPsola();
     const bool variableBlocks = testVariableHostBlocks();
     const bool productionAdapter = testProductionAdapter();
+    const bool productionAdapterFastGlide = testProductionAdapterFastGlide();
     const bool adapterControlAveraging = testAdapterAveragesControlsAcrossHostBlocks();
 
     if (!shiftedVoice1024 || !shiftedVoice2048 || !shiftedVoice4096 || !unshiftedLowVoice
         || !lowVoiceDown || !midVoiceUp || !highVoiceDown || !highVoiceUp
-        || impulsePeak < 0 || !adapterImpulseTests || !pitchGlide || !fastPitchGlide || !stereoPsola || !variableBlocks || !productionAdapter || !adapterControlAveraging)
+        || impulsePeak < 0 || !adapterImpulseTests || !pitchGlide || !fastPitchGlide || !stereoPsola || !variableBlocks || !productionAdapter || !productionAdapterFastGlide || !adapterControlAveraging)
     {
         std::cerr << "PSOLA quality test failed: shifted2048=" << shiftedVoice2048
                   << ", shifted1024=" << shiftedVoice1024 << ", shifted2048=" << shiftedVoice2048
