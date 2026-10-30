@@ -2,6 +2,7 @@
 #include <JuceHeader.h>
 #include <array>
 #include <atomic>
+#include "PsolaRealtimeAdapter.h"
 
 class TunePXOCobiAudioProcessor final : public juce::AudioProcessor
 {
@@ -43,6 +44,7 @@ private:
     int quantiseMidiNote(float midiNote, int key, int scale) const noexcept;
 
     static constexpr int pitchWindowSize = 512;
+    PsolaRealtimeAdapter psola;
     static constexpr int delayBufferSize = 2048;
     std::array<float, pitchWindowSize> pitchBuffer {};
     int pitchWritePosition = 0;
