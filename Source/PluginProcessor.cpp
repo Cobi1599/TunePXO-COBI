@@ -170,61 +170,82 @@ void TunePXOCobiAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, j
     juce::ScopedNoDenormals noDenormals;
     const int channels = juce::jmin(buffer.getNumChannels(), 2);
     const int numSamples = buffer.getNumSamples();
+    if (channels <= 0 || numSamples <= 0)
+        return;
+
     const int mode = (int)parameters.getRawParameterValue("MODE")->load();
     const int key = (int)parameters.getRawParameterValue("KEY")->load();
     const int scale = (int)parameters.getRawParameterValue("SCALE")->load();
     const float retune = parameters.getRawParameterValue("RETUNE")->load();
     const float humanize = parameters.getRawParameterValue("HUMANIZE")->load();
-    const float mix = parameters.getRawParameterValue("MIX")->load() * 0.01f;
+    const float mix = juce::jlimit(0.0f, 1.0f,
+        parameters.getRawParameterValue("MIX")->load() * 0.01f);
 
-    for (int i = 0; i < numSamples; ++i) {
-        float mono = 0.0f;
-        for (int ch = 0; ch < channels; ++ch) mono += buffer.getReadPointer(ch)[i];
-        mono /= (float)juce::jmax(1, channels);
+    // Process detection and audio in the same sample loop. This keeps pitch
+    // decisions and retune smoothing independent of the host's block size.
+    const float speed = juce::jlimit(0.0f, 1.0f, retune * 0.01f);
+    const float human = juce::jlimit(0.0f, 1.0f, humanize * 0.01f);
+    const float modeTimeFactor = mode == 0 ? 1.0f : 0.12f;
+    const float retuneSeconds = (0.0005f + speed * speed * 0.12f)
+                              * modeTimeFactor * (1.0f + human * 2.0f);
+    const float smoothing = retune <= 0.01f ? 1.0f
+        : 1.0f - std::exp(-1.0f / (retuneSeconds * (float)currentSampleRate));
 
-        if ((samplesSinceAnalysis++ % analysisDecimation) == 0) {
+    auto* left = buffer.getWritePointer(0);
+    auto* right = channels > 1 ? buffer.getWritePointer(1) : nullptr;
+
+    for (int i = 0; i < numSamples; ++i)
+    {
+        const float mono = channels > 1 ? 0.5f * (left[i] + right[i]) : left[i];
+
+        if ((samplesSinceAnalysis++ % analysisDecimation) == 0)
+        {
             pitchBuffer[(size_t)pitchWritePosition] = mono;
             pitchWritePosition = (pitchWritePosition + 1) % pitchWindowSize;
         }
-        if (samplesSinceAnalysis >= 512) {
+
+        if (samplesSinceAnalysis >= pitchWindowSize)
+        {
             samplesSinceAnalysis = 0;
             analysePitch();
         }
-    }
 
-    const int detected = detectedMidiNote.load(std::memory_order_relaxed);
-    const float frequency = detectedFrequency.load(std::memory_order_relaxed);
-    if (detected >= 0 && frequency > 0.0f) {
-        const float originalMidi = 69.0f + 12.0f * std::log2(frequency / 440.0f);
-        const float targetMidi = (float)quantiseMidiNote(originalMidi, key, scale);
-        const float speed = juce::jlimit(0.0f, 1.0f, retune * 0.01f);
-        const float naturalFactor = mode == 0 ? 1.0f : 2.5f;
-        const float humanFactor = 1.0f - 0.82f * (humanize * 0.01f);
-        const float smoothing = juce::jlimit(0.001f, 0.95f,
-            (0.004f + speed * speed * 0.72f) * naturalFactor * humanFactor);
-        if (smoothedMidiNote < 0.0f) smoothedMidiNote = originalMidi;
-        smoothedMidiNote += (targetMidi - smoothedMidiNote) * smoothing;
-        const float correctionSemitones = (smoothedMidiNote - originalMidi) * mix;
-        const float ratio = std::pow(2.0f, correctionSemitones / 12.0f);
+        const int detected = detectedMidiNote.load(std::memory_order_relaxed);
+        const float frequency = detectedFrequency.load(std::memory_order_relaxed);
+        float ratio = 1.0f;
 
-        for (int i = 0; i < numSamples; ++i) {
-            for (int ch = 0; ch < channels; ++ch) {
-                const float dry = buffer.getReadPointer(ch)[i];
-                const float wet = processPitchShift(ch, dry, ratio);
-                buffer.getWritePointer(ch)[i] = dry + (wet - dry) * mix;
-            }
-            shifterPhase += (1.0f - ratio) / 256.0f;
-            if (shifterPhase >= 1.0f) shifterPhase -= 1.0f;
-            if (shifterPhase < 0.0f) shifterPhase += 1.0f;
-            delayWritePosition = (delayWritePosition + 1) % delayBufferSize;
+        if (detected >= 0 && frequency > 0.0f)
+        {
+            const float originalMidi = 69.0f + 12.0f * std::log2(frequency / 440.0f);
+            const float targetMidi = (float)quantiseMidiNote(originalMidi, key, scale);
+
+            if (smoothedMidiNote < 0.0f)
+                smoothedMidiNote = originalMidi;
+
+            smoothedMidiNote += (targetMidi - smoothedMidiNote) * smoothing;
+            const float correctionSemitones = smoothedMidiNote - originalMidi;
+            ratio = std::pow(2.0f, correctionSemitones / 12.0f);
         }
-    } else {
-        smoothedMidiNote = -1.0f;
-        for (int i = 0; i < numSamples; ++i) {
-            for (int ch = 0; ch < channels; ++ch)
-                processPitchShift(ch, buffer.getReadPointer(ch)[i], 1.0f);
-            delayWritePosition = (delayWritePosition + 1) % delayBufferSize;
+        else
+        {
+            smoothedMidiNote = -1.0f;
         }
+
+        const float dryLeft = left[i];
+        const float wetLeft = processPitchShift(0, dryLeft, ratio);
+        left[i] = dryLeft + (wetLeft - dryLeft) * mix;
+
+        if (right != nullptr)
+        {
+            const float dryRight = right[i];
+            const float wetRight = processPitchShift(1, dryRight, ratio);
+            right[i] = dryRight + (wetRight - dryRight) * mix;
+        }
+
+        shifterPhase += (1.0f - ratio) / 256.0f;
+        if (shifterPhase >= 1.0f) shifterPhase -= 1.0f;
+        if (shifterPhase < 0.0f) shifterPhase += 1.0f;
+        delayWritePosition = (delayWritePosition + 1) % delayBufferSize;
     }
 }
 
