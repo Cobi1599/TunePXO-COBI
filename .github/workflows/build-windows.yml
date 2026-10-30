@@ -40,7 +40,7 @@ jobs:
         run: ctest --test-dir build -C Release --output-on-failure
 
       - name: Run full processor latency integration test
-        run: .\\build\\Release\\ProcessorIntegrationTest.exe
+        run: '& .\build\ProcessorIntegrationTest_artefacts\Release\ProcessorIntegrationTest.exe'
 
       - name: Upload plugin builds
         uses: actions/upload-artifact@v4
