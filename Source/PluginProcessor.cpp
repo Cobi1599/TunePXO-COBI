@@ -261,11 +261,11 @@ void TunePXOCobiAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, j
 
     for (int i = 0; i < numSamples; ++i)
     {
-        if (engine == 1) {
-            psolaDryRing[0][(size_t)dryWritePosition] = left[i];
-            psolaDryRing[1][(size_t)dryWritePosition] = right != nullptr ? right[i] : left[i];
-            dryWritePosition = (dryWritePosition + 1) % dryRingSize;
-        }
+        // Keep the dry history warm regardless of the selected engine so
+        // switching to PSOLA never blends against stale samples.
+        psolaDryRing[0][(size_t)dryWritePosition] = left[i];
+        psolaDryRing[1][(size_t)dryWritePosition] = right != nullptr ? right[i] : left[i];
+        dryWritePosition = (dryWritePosition + 1) % dryRingSize;
         const float mono = channels > 1 ? 0.5f * (left[i] + right[i]) : left[i];
 
         if ((audioSampleCounter++ % analysisDecimation) == 0)
@@ -326,16 +326,19 @@ void TunePXOCobiAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, j
         smoothedPitchRatio += (targetRatio - smoothedPitchRatio) * ratioSmoothing;
         const float ratio = smoothedPitchRatio;
 
-        if (engine == 0) {
+        // Run Legacy continuously in the background. This keeps its delay
+        // line and latency FIFO current while PSOLA is selected, avoiding a
+        // stale-buffer burst when the user switches engines during playback.
         const float dryLeft = left[i];
         const float wetLeft = processPitchShift(0, dryLeft, ratio);
-        left[i] = dryLeft + (wetLeft - dryLeft) * mix;
+        const float legacyLeft = dryLeft + (wetLeft - dryLeft) * mix;
 
+        float legacyRight = legacyLeft;
         if (right != nullptr)
         {
             const float dryRight = right[i];
             const float wetRight = processPitchShift(1, dryRight, ratio);
-            right[i] = dryRight + (wetRight - dryRight) * mix;
+            legacyRight = dryRight + (wetRight - dryRight) * mix;
         }
 
         shifterPhase += (1.0f - ratio) / pitchShiftDelayRange;
@@ -343,15 +346,14 @@ void TunePXOCobiAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, j
         if (shifterPhase < 0.0f) shifterPhase += 1.0f;
         delayWritePosition = (delayWritePosition + 1) % delayBufferSize;
 
-        // Keep the legacy engine's output delay equal to the PSOLA path so
-        // the host's fixed plug-in latency remains valid when ENGINE changes.
-        legacyLatencyRing[0][(size_t)legacyLatencyWritePosition] = left[i];
-        legacyLatencyRing[1][(size_t)legacyLatencyWritePosition] = right != nullptr ? right[i] : left[i];
-        int legacyRead = (legacyLatencyWritePosition - psolaLatencySamples + dryRingSize) % dryRingSize;
-        left[i] = legacyLatencyRing[0][(size_t)legacyRead];
-        if (right != nullptr) right[i] = legacyLatencyRing[1][(size_t)legacyRead];
-        legacyLatencyWritePosition = (legacyLatencyWritePosition + 1) % dryRingSize;
+        legacyLatencyRing[0][(size_t)legacyLatencyWritePosition] = legacyLeft;
+        legacyLatencyRing[1][(size_t)legacyLatencyWritePosition] = legacyRight;
+        const int legacyRead = (legacyLatencyWritePosition - psolaLatencySamples + dryRingSize) % dryRingSize;
+        if (engine == 0) {
+            left[i] = legacyLatencyRing[0][(size_t)legacyRead];
+            if (right != nullptr) right[i] = legacyLatencyRing[1][(size_t)legacyRead];
         }
+        legacyLatencyWritePosition = (legacyLatencyWritePosition + 1) % dryRingSize;
     }
     if (engine == 1) {
         const int measuredPeriod = PsolaRealtimeAdapter::periodFromFrequency(
