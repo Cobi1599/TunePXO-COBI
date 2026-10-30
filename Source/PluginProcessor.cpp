@@ -47,6 +47,8 @@ void TunePXOCobiAudioProcessor::prepareToPlay(double sampleRate, int)
     shifterPhase = 0.0f;
     smoothedMidiNote = -1.0f;
     smoothedPitchRatio = 1.0f;
+    heldTargetPitchRatio = 1.0f;
+    samplesSinceValidPitch = 0;
     detectedMidiNote.store(-1, std::memory_order_relaxed);
     detectedFrequency.store(0.0f, std::memory_order_relaxed);
 }
@@ -258,10 +260,21 @@ void TunePXOCobiAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, j
             smoothedMidiNote += (targetMidi - smoothedMidiNote) * smoothing;
             const float correctionSemitones = smoothedMidiNote - originalMidi;
             targetRatio = std::pow(2.0f, correctionSemitones / 12.0f);
+            heldTargetPitchRatio = targetRatio;
+            samplesSinceValidPitch = 0;
         }
         else
         {
-            smoothedMidiNote = -1.0f;
+            // Ignore very short unvoiced/detection gaps instead of abruptly
+            // pulling the correction back to unity in the middle of a note.
+            samplesSinceValidPitch += 1;
+            constexpr int dropoutHoldSamples = (int)(0.045 * 44100.0);
+            const int holdSamples = (int)(0.045 * currentSampleRate);
+            if (samplesSinceValidPitch <= holdSamples)
+                targetRatio = heldTargetPitchRatio;
+            else
+                smoothedMidiNote = -1.0f;
+            juce::ignoreUnused(dropoutHoldSamples);
         }
 
         // Smooth ratio changes, including brief detector dropouts, to suppress tiny RF-like ticks.
