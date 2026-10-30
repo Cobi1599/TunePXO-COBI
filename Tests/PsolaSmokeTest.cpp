@@ -564,6 +564,89 @@ bool testSinusoidalDelayResponse()
     return bestDelay >= 0 && std::isfinite(bestError);
 }
 
+bool testAbruptControlTransitions()
+{
+    constexpr double sampleRate = 44100.0;
+    constexpr double inputFrequency = 220.0;
+    constexpr int frameSize = 1024;
+    constexpr int totalFrames = 240;
+    constexpr int transitionFrames[] = { 80, 120, 160 };
+    constexpr double shifts[] = { 0.0, -5.0, 5.0, 0.0 };
+    const int maxPeriod = static_cast<int>(std::ceil(sampleRate / 65.0));
+    const int period = static_cast<int>(std::lround(sampleRate / inputFrequency));
+
+    TD_pitch_shift::Sola processor(1, frameSize, maxPeriod);
+    juce::AudioBuffer<float> frame(1, frameSize);
+    std::vector<float> output;
+    output.reserve(totalFrames * frameSize);
+    double phase = 0.0;
+    bool allFinite = true;
+
+    for (int block = 0; block < totalFrames; ++block)
+    {
+        int state = 0;
+        for (int transition : transitionFrames)
+            if (block >= transition)
+                ++state;
+
+        auto* samples = frame.getWritePointer(0);
+        for (int i = 0; i < frameSize; ++i)
+        {
+            samples[i] = 0.4f * static_cast<float>(std::sin(phase));
+            phase += juce::MathConstants<double>::twoPi * inputFrequency / sampleRate;
+            if (phase >= juce::MathConstants<double>::twoPi)
+                phase -= juce::MathConstants<double>::twoPi;
+        }
+
+        processor.Process(frame, period, shifts[state]);
+        for (int i = 0; i < frameSize; ++i)
+        {
+            allFinite = allFinite && std::isfinite(samples[i]);
+            output.push_back(samples[i]);
+        }
+    }
+
+    // PSOLA's measured engine delay is about 1358 samples. Inspect a generous
+    // region around each expected transition and compare its largest sample
+    // step with the typical local slope of the same waveform.
+    double worstPeakStep = 0.0;
+    double worstRmsStep = 0.0;
+    double worstPeakToRms = 0.0;
+    for (int transition : transitionFrames)
+    {
+        const int expected = transition * frameSize + 1358;
+        const int begin = std::max(1, expected - 2 * frameSize);
+        const int end = std::min(static_cast<int>(output.size()) - 1,
+                                 expected + 2 * frameSize);
+        double sumSquares = 0.0;
+        double peakStep = 0.0;
+        int count = 0;
+        for (int i = begin; i < end; ++i)
+        {
+            const double step = std::abs(static_cast<double>(output[static_cast<size_t>(i)])
+                                        - output[static_cast<size_t>(i - 1)]);
+            peakStep = std::max(peakStep, step);
+            sumSquares += step * step;
+            ++count;
+        }
+        const double rmsStep = count > 0 ? std::sqrt(sumSquares / count) : 0.0;
+        const double ratio = rmsStep > 0.0 ? peakStep / rmsStep : 0.0;
+        worstPeakStep = std::max(worstPeakStep, peakStep);
+        worstRmsStep = std::max(worstRmsStep, rmsStep);
+        worstPeakToRms = std::max(worstPeakToRms, ratio);
+        std::cout << "PSOLA abrupt control transition frame=" << transition
+                  << ", shift " << shifts[(&transition - transitionFrames)] 
+                  << ", peak-step=" << peakStep << ", local-rms-step=" << rmsStep
+                  << ", peak/rms=" << ratio << std::endl;
+    }
+
+    std::cout << "PSOLA abrupt transition summary: finite=" << allFinite
+              << ", worst peak-step=" << worstPeakStep
+              << ", worst local-rms-step=" << worstRmsStep
+              << ", worst peak/rms=" << worstPeakToRms << std::endl;
+    return allFinite && worstPeakStep > 0.0 && std::isfinite(worstPeakToRms);
+}
+
 bool testStereoPsola()
 {
     constexpr double sampleRate = 44100.0;
@@ -907,6 +990,7 @@ int main()
     const bool pitchGlide = testPitchGlide();
     const bool fastPitchGlide = testFastPitchGlide();
     const bool sinusoidalDelayResponse = testSinusoidalDelayResponse();
+    const bool abruptTransitions = testAbruptControlTransitions();
     const bool stereoPsola = testStereoPsola();
     const bool variableBlocks = testVariableHostBlocks();
     const bool productionAdapter = testProductionAdapter();
@@ -915,7 +999,7 @@ int main()
 
     if (!shiftedVoice1024 || !shiftedVoice2048 || !shiftedVoice4096 || !unshiftedLowVoice
         || !lowVoiceDown || !midVoiceUp || !highVoiceDown || !highVoiceUp
-        || impulsePeak < 0 || !adapterImpulseTests || !pitchGlide || !fastPitchGlide || !sinusoidalDelayResponse || !stereoPsola || !variableBlocks || !productionAdapter || !productionAdapterFastGlide || !adapterControlAveraging)
+        || impulsePeak < 0 || !adapterImpulseTests || !pitchGlide || !fastPitchGlide || !sinusoidalDelayResponse || !abruptTransitions || !stereoPsola || !variableBlocks || !productionAdapter || !productionAdapterFastGlide || !adapterControlAveraging)
     {
         std::cerr << "PSOLA quality test failed: shifted2048=" << shiftedVoice2048
                   << ", shifted1024=" << shiftedVoice1024 << ", shifted2048=" << shiftedVoice2048
