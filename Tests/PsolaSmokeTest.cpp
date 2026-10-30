@@ -358,6 +358,85 @@ bool testPitchGlide()
         && trackingMeasured > 0.0 && std::abs(trackingErrorCents) <= 65.0;
 }
 
+
+bool testFastPitchGlide()
+{
+    constexpr double sampleRate = 44100.0;
+    constexpr int frameSize = 1024;
+    constexpr int glideFrames = 64;
+    constexpr int settleFrames = 32;
+    constexpr double startFrequency = 180.0;
+    constexpr double endFrequency = 280.0;
+    constexpr double shiftSemitones = -3.0;
+    const int maxPeriod = static_cast<int>(std::ceil(sampleRate / 65.0));
+
+    TD_pitch_shift::Sola processor(1, frameSize, maxPeriod);
+    juce::AudioBuffer<float> frame(1, frameSize);
+    std::vector<float> settledSegment;
+    std::vector<float> trackingSegment;
+    settledSegment.reserve(settleFrames * frameSize);
+    trackingSegment.reserve(16 * frameSize);
+    double phase = 0.0;
+    bool allFinite = true;
+
+    // Sweep the input pitch, then hold the final note so the measurement
+    // evaluates steady-state tracking rather than averaging the whole glide.
+    for (int block = 0; block < glideFrames + settleFrames; ++block)
+    {
+        const double progress = static_cast<double>(std::min(block, glideFrames - 1))
+            / static_cast<double>(glideFrames - 1);
+        const double frequency = block < glideFrames
+            ? startFrequency + (endFrequency - startFrequency) * progress
+            : endFrequency;
+        const int period = static_cast<int>(std::lround(sampleRate / frequency));
+        const double phaseStep = juce::MathConstants<double>::twoPi * frequency / sampleRate;
+        auto* samples = frame.getWritePointer(0);
+        for (int i = 0; i < frameSize; ++i)
+        {
+            samples[i] = 0.45f * static_cast<float>(std::sin(phase));
+            phase += phaseStep;
+            if (phase >= juce::MathConstants<double>::twoPi)
+                phase -= juce::MathConstants<double>::twoPi;
+        }
+
+        processor.Process(frame, period, shiftSemitones);
+        for (int i = 0; i < frameSize; ++i)
+        {
+            allFinite = allFinite && std::isfinite(samples[i]);
+            if (block >= glideFrames)
+                settledSegment.push_back(samples[i]);
+            else if (block >= glideFrames - 8)
+                trackingSegment.push_back(samples[i]);
+        }
+    }
+
+    const double expected = endFrequency * std::pow(2.0, shiftSemitones / 12.0);
+    const double measured = estimateFrequency(settledSegment, sampleRate, expected);
+    const double trackingExpectedInput = startFrequency
+        + (endFrequency - startFrequency)
+            * (static_cast<double>(glideFrames - 8) / static_cast<double>(glideFrames - 1));
+    const double trackingExpected = trackingExpectedInput * std::pow(2.0, shiftSemitones / 12.0);
+    const double trackingMeasured = estimateFrequency(trackingSegment, sampleRate, trackingExpected);
+    const double trackingErrorCents = trackingMeasured > 0.0
+        ? 1200.0 * std::log2(trackingMeasured / trackingExpected) : 10000.0;
+    const double errorCents = measured > 0.0
+        ? 1200.0 * std::log2(measured / expected) : 10000.0;
+    double energy = 0.0;
+    for (float sample : settledSegment)
+        energy += static_cast<double>(sample) * sample;
+
+    std::cout << "PSOLA fast glide " << startFrequency << "->" << endFrequency
+              << " Hz then hold, expected=" << expected << " Hz, measured="
+              << measured << " Hz, error=" << errorCents
+              << " cents; glide-tail expected=" << trackingExpected
+              << " Hz, measured=" << trackingMeasured
+              << " Hz, error=" << trackingErrorCents
+              << " cents, finite=" << allFinite << std::endl;
+    return allFinite && energy / settledSegment.size() > 1.0e-6
+        && std::abs(errorCents) <= 35.0
+        && trackingMeasured > 0.0 && std::abs(trackingErrorCents) <= 90.0;
+}
+
 bool testStereoPsola()
 {
     constexpr double sampleRate = 44100.0;
@@ -580,19 +659,20 @@ int main()
                                && adapterImpulseTests;
     std::cout << "Adapter latency matrix passed=" << adapterImpulseTests << std::endl;
     const bool pitchGlide = testPitchGlide();
+    const bool fastPitchGlide = testFastPitchGlide();
     const bool stereoPsola = testStereoPsola();
     const bool variableBlocks = testVariableHostBlocks();
     const bool productionAdapter = testProductionAdapter();
 
     if (!shiftedVoice1024 || !shiftedVoice2048 || !shiftedVoice4096 || !unshiftedLowVoice
         || !lowVoiceDown || !midVoiceUp || !highVoiceDown || !highVoiceUp
-        || impulsePeak < 0 || !adapterImpulseTests || !pitchGlide || !stereoPsola || !variableBlocks || !productionAdapter)
+        || impulsePeak < 0 || !adapterImpulseTests || !pitchGlide || !fastPitchGlide || !stereoPsola || !variableBlocks || !productionAdapter)
     {
         std::cerr << "PSOLA quality test failed: shifted2048=" << shiftedVoice2048
                   << ", shifted1024=" << shiftedVoice1024 << ", shifted2048=" << shiftedVoice2048
                   << ", shifted4096=" << shiftedVoice4096 << ", unshiftedLowVoice=" << unshiftedLowVoice
                   << ", impulsePeak=" << impulsePeak << ", adapterImpulseTests=" << adapterImpulseTests << ", stereoPsola=" << stereoPsola
-                  << ", pitchGlide=" << pitchGlide << ", variableBlocks=" << variableBlocks << ", productionAdapter=" << productionAdapter << std::endl;
+                  << ", pitchGlide=" << pitchGlide << ", fastPitchGlide=" << fastPitchGlide << ", variableBlocks=" << variableBlocks << ", productionAdapter=" << productionAdapter << std::endl;
         return 1;
     }
 
