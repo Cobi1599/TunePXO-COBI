@@ -495,6 +495,7 @@ int main()
         for (double shift : { -5.0, 0.0, 5.0 })
             adapterImpulseTests = (measureProductionAdapterImpulsePeak(rate, shift) > 0)
                                && adapterImpulseTests;
+    std::cout << "Adapter latency matrix passed=" << adapterImpulseTests << std::endl;
     const bool stereoPsola = testStereoPsola();
     const bool variableBlocks = testVariableHostBlocks();
     const bool productionAdapter = testProductionAdapter();
