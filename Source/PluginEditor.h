@@ -2,13 +2,14 @@
 #include <JuceHeader.h>
 #include "PluginProcessor.h"
 
-class TunePXOCobiAudioProcessorEditor final : public juce::AudioProcessorEditor
+class TunePXOCobiAudioProcessorEditor final : public juce::AudioProcessorEditor, private juce::Timer
 {
 public:
     explicit TunePXOCobiAudioProcessorEditor(TunePXOCobiAudioProcessor&);
     ~TunePXOCobiAudioProcessorEditor() override = default;
     void paint(juce::Graphics&) override;
     void resized() override;
+    void timerCallback() override;
 
 private:
     TunePXOCobiAudioProcessor& audioProcessor;
