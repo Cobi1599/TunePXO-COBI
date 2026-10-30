@@ -43,6 +43,9 @@ public:
         for (auto& channel : outputRing)
             channel.fill(0.0f);
         frameFill = 0;
+        periodFrequencySum = 0.0;
+        semitoneSum = 0.0;
+        parameterSampleCount = 0;
         readOutput = writeOutput = outputCount = 0;
         // One frame of startup silence keeps the FIFO deterministic.
         for (int i = 0; i < frameSize; ++i)
@@ -69,6 +72,13 @@ public:
             inputFrame[0][static_cast<size_t>(frameFill)] = left[i];
             inputFrame[1][static_cast<size_t>(frameFill)] = right != nullptr ? right[i] : left[i];
 
+            // Host blocks can split a PSOLA frame. Accumulate the control
+            // estimates over the samples that actually form this frame,
+            // rather than applying only the values from its final host block.
+            periodFrequencySum += 1.0 / static_cast<double>(safePeriod);
+            semitoneSum += safeShift;
+            ++parameterSampleCount;
+
             const float outLeft = popOutput(0);
             const float outRight = popOutput(1);
             left[i] = outLeft;
@@ -79,7 +89,16 @@ public:
             {
                 frame.copyFrom(0, 0, inputFrame[0].data(), frameSize);
                 frame.copyFrom(1, 0, inputFrame[1].data(), frameSize);
-                processor->Process(frame, safePeriod, safeShift);
+                const double averageFrequency = periodFrequencySum
+                    / static_cast<double>(parameterSampleCount);
+                const int framePeriod = juce::jlimit(1, maxPeriod,
+                    static_cast<int>(std::lround(1.0 / averageFrequency)));
+                const double frameShift = semitoneSum
+                    / static_cast<double>(parameterSampleCount);
+                processor->Process(frame, framePeriod, frameShift);
+                periodFrequencySum = 0.0;
+                semitoneSum = 0.0;
+                parameterSampleCount = 0;
                 for (int sample = 0; sample < frameSize; ++sample)
                 {
                     pushOutput(0, frame.getSample(0, sample));
@@ -138,6 +157,9 @@ private:
     std::array<std::array<float, ringSize>, maxChannels> outputRing {};
     int maxPeriod = 1;
     int frameFill = 0;
+    double periodFrequencySum = 0.0;
+    double semitoneSum = 0.0;
+    int parameterSampleCount = 0;
     int readOutput = 0, writeOutput = 0, outputCount = 0;
     int underflows = 0, overflows = 0;
 };
