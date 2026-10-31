@@ -988,10 +988,9 @@ struct HarmonicEnvelopeResult
     bool finite = true;
 };
 
-HarmonicEnvelopeResult measureHarmonicEnvelope(double semitones)
+HarmonicEnvelopeResult measureHarmonicEnvelope(double semitones, double frequency = 220.0)
 {
     constexpr double sampleRate = 44100.0;
-    constexpr double frequency = 220.0;
     constexpr int frameSize = 1024;
     constexpr int warmupFrames = 80;
     constexpr int captureFrames = 160;
@@ -1068,13 +1067,19 @@ bool testHarmonicVoiceEnvelope()
     const auto unshifted = measureHarmonicEnvelope(0.0);
     const auto down = measureHarmonicEnvelope(-5.0);
     const auto up = measureHarmonicEnvelope(5.0);
-    std::cout << "PSOLA +5st RMS windows:";
+    const auto upExactPeriod = measureHarmonicEnvelope(5.0, 220.5);
+    std::cout << "PSOLA +5st RMS windows (220 Hz, fractional period):";
     for (double value : up.windowRms)
+        std::cout << " " << value;
+    std::cout << std::endl;
+    std::cout << "PSOLA +5st exact-period RMS windows (220.5 Hz):";
+    for (double value : upExactPeriod.windowRms)
         std::cout << " " << value;
     std::cout << std::endl;
     const double worstShiftedVariation = std::max(
         down.coefficientOfVariation, up.coefficientOfVariation);
-    const bool passed = unshifted.finite && down.finite && up.finite
+    const bool passed = unshifted.finite && down.finite && up.finite && upExactPeriod.finite
+        && upExactPeriod.meanRms > 1.0e-4
         && unshifted.meanRms > 1.0e-4 && down.meanRms > 1.0e-4 && up.meanRms > 1.0e-4
         && worstShiftedVariation < 0.12
         && worstShiftedVariation < unshifted.coefficientOfVariation + 0.10;
@@ -1085,6 +1090,8 @@ bool testHarmonicVoiceEnvelope()
               << " CV=" << down.coefficientOfVariation
               << ", +5st RMS=" << up.meanRms
               << " CV=" << up.coefficientOfVariation
+              << ", +5st exact-period 220.5Hz RMS=" << upExactPeriod.meanRms
+              << " CV=" << upExactPeriod.coefficientOfVariation
               << ", passed=" << passed << std::endl;
     return passed;
 }
