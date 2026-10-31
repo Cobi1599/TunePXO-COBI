@@ -978,6 +978,108 @@ bool testProductionAdapterFastGlide()
         && adapter.getOverflows() == 0;
 }
 
+struct HarmonicEnvelopeResult
+{
+    double meanRms = 0.0;
+    double coefficientOfVariation = 0.0;
+    bool finite = true;
+};
+
+HarmonicEnvelopeResult measureHarmonicEnvelope(double semitones)
+{
+    constexpr double sampleRate = 44100.0;
+    constexpr double frequency = 220.0;
+    constexpr int frameSize = 1024;
+    constexpr int warmupFrames = 80;
+    constexpr int captureFrames = 160;
+    constexpr int windowSamples = 4096;
+    const int period = static_cast<int>(std::lround(sampleRate / frequency));
+    TD_pitch_shift::Sola processor(1, frameSize,
+        static_cast<int>(std::ceil(sampleRate / 65.0)));
+    juce::AudioBuffer<float> frame(1, frameSize);
+    std::vector<float> captured;
+    captured.reserve(captureFrames * frameSize);
+    double phase = 0.0;
+
+    for (int block = 0; block < warmupFrames + captureFrames; ++block)
+    {
+        auto* samples = frame.getWritePointer(0);
+        for (int i = 0; i < frameSize; ++i)
+        {
+            double value = 0.0;
+            for (int harmonic = 1; harmonic <= 8; ++harmonic)
+                value += (0.42 / harmonic)
+                    * std::sin(harmonic * phase + 0.17 * harmonic);
+            samples[i] = static_cast<float>(value);
+            phase += juce::MathConstants<double>::twoPi * frequency / sampleRate;
+            if (phase >= juce::MathConstants<double>::twoPi)
+                phase -= juce::MathConstants<double>::twoPi;
+        }
+
+        processor.Process(frame, period, semitones);
+        for (int i = 0; i < frameSize; ++i)
+        {
+            result.finite = result.finite && std::isfinite(samples[i]);
+            if (block >= warmupFrames)
+                captured.push_back(samples[i]);
+        }
+    }
+
+    std::vector<double> windowRms;
+    for (size_t start = 0; start + windowSamples <= captured.size(); start += windowSamples)
+    {
+        double energy = 0.0;
+        for (int i = 0; i < windowSamples; ++i)
+        {
+            const double sample = captured[start + static_cast<size_t>(i)];
+            energy += sample * sample;
+        }
+        windowRms.push_back(std::sqrt(energy / windowSamples));
+    }
+
+    if (!windowRms.empty())
+    {
+        for (double value : windowRms)
+            result.meanRms += value;
+        result.meanRms /= static_cast<double>(windowRms.size());
+        double variance = 0.0;
+        for (double value : windowRms)
+        {
+            const double delta = value - result.meanRms;
+            variance += delta * delta;
+        }
+        variance /= static_cast<double>(windowRms.size());
+        result.coefficientOfVariation = result.meanRms > 0.0
+            ? std::sqrt(variance) / result.meanRms : 1.0;
+    }
+    else
+        result.finite = false;
+
+    return result;
+}
+
+bool testHarmonicVoiceEnvelope()
+{
+    const auto unshifted = measureHarmonicEnvelope(0.0);
+    const auto down = measureHarmonicEnvelope(-5.0);
+    const auto up = measureHarmonicEnvelope(5.0);
+    const double worstShiftedVariation = std::max(
+        down.coefficientOfVariation, up.coefficientOfVariation);
+    const bool passed = unshifted.finite && down.finite && up.finite
+        && unshifted.meanRms > 1.0e-4 && down.meanRms > 1.0e-4 && up.meanRms > 1.0e-4
+        && worstShiftedVariation < 0.12
+        && worstShiftedVariation < unshifted.coefficientOfVariation + 0.10;
+
+    std::cout << "PSOLA harmonic envelope: unshifted RMS=" << unshifted.meanRms
+              << " CV=" << unshifted.coefficientOfVariation
+              << ", -5st RMS=" << down.meanRms
+              << " CV=" << down.coefficientOfVariation
+              << ", +5st RMS=" << up.meanRms
+              << " CV=" << up.coefficientOfVariation
+              << ", passed=" << passed << std::endl;
+    return passed;
+}
+
 bool testReturnToZeroPhaseSweep()
 {
     constexpr double sampleRate = 44100.0;
@@ -1176,6 +1278,7 @@ int main()
     const bool sinusoidalDelayResponse = testSinusoidalDelayResponse();
     const bool abruptTransitions = testAbruptControlTransitions();
     const bool returnToZeroPhaseSweep = testReturnToZeroPhaseSweep();
+    const bool harmonicVoiceEnvelope = testHarmonicVoiceEnvelope();
     const bool stereoPsola = testStereoPsola();
     const bool variableBlocks = testVariableHostBlocks();
     const bool productionAdapter = testProductionAdapter();
@@ -1184,7 +1287,7 @@ int main()
 
     if (!shiftedVoice1024 || !shiftedVoice2048 || !shiftedVoice4096 || !unshiftedLowVoice
         || !lowVoiceDown || !midVoiceUp || !highVoiceDown || !highVoiceUp
-        || impulsePeak < 0 || !adapterImpulseTests || !pitchGlide || !fastPitchGlide || !sinusoidalDelayResponse || !abruptTransitions || !returnToZeroPhaseSweep || !stereoPsola || !variableBlocks || !productionAdapter || !productionAdapterFastGlide || !adapterControlAveraging)
+        || impulsePeak < 0 || !adapterImpulseTests || !pitchGlide || !fastPitchGlide || !sinusoidalDelayResponse || !abruptTransitions || !returnToZeroPhaseSweep || !harmonicVoiceEnvelope || !stereoPsola || !variableBlocks || !productionAdapter || !productionAdapterFastGlide || !adapterControlAveraging)
     {
         std::cerr << "PSOLA quality test failed: shifted2048=" << shiftedVoice2048
                   << ", shifted1024=" << shiftedVoice1024 << ", shifted2048=" << shiftedVoice2048
