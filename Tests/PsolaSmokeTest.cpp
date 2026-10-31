@@ -1086,6 +1086,14 @@ bool testHarmonicVoiceEnvelope()
                       << ", RMS=" << result.meanRms << std::endl;
         }
     }
+    for (double shift : { 6.0, 7.0, 8.0 })
+    {
+        const auto probe = measureHarmonicEnvelope(shift, 440.0);
+        std::cout << "PSOLA 440Hz boundary probe shift=" << shift
+                  << "st, CV=" << probe.coefficientOfVariation
+                  << ", minRMS=" << probe.minimumRms
+                  << ", maxRMS=" << probe.maximumRms << std::endl;
+    }
     std::cout << "PSOLA +5st RMS windows (220 Hz, fractional period):";
     for (double value : up.windowRms)
         std::cout << " " << value;
