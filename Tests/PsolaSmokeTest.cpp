@@ -988,7 +988,7 @@ struct HarmonicEnvelopeResult
     bool finite = true;
 };
 
-HarmonicEnvelopeResult measureHarmonicEnvelope(double semitones, double frequency = 220.0)
+HarmonicEnvelopeResult measureHarmonicEnvelope(double semitones, double frequency = 220.0, int harmonicCount = 8)
 {
     constexpr double sampleRate = 44100.0;
     constexpr int frameSize = 1024;
@@ -1010,7 +1010,7 @@ HarmonicEnvelopeResult measureHarmonicEnvelope(double semitones, double frequenc
         for (int i = 0; i < frameSize; ++i)
         {
             double value = 0.0;
-            for (int harmonic = 1; harmonic <= 8; ++harmonic)
+            for (int harmonic = 1; harmonic <= harmonicCount; ++harmonic)
                 value += (0.42 / harmonic)
                     * std::sin(harmonic * phase + 0.17 * harmonic);
             samples[i] = static_cast<float>(value);
@@ -1088,11 +1088,15 @@ bool testHarmonicVoiceEnvelope()
     }
     for (double shift : { 6.0, 7.0, 8.0 })
     {
-        const auto probe = measureHarmonicEnvelope(shift, 440.0);
+        const auto probe = measureHarmonicEnvelope(shift, 440.0, 8);
+        const auto sineProbe = measureHarmonicEnvelope(shift, 440.0, 1);
         std::cout << "PSOLA 440Hz boundary probe shift=" << shift
-                  << "st, CV=" << probe.coefficientOfVariation
-                  << ", minRMS=" << probe.minimumRms
-                  << ", maxRMS=" << probe.maximumRms << std::endl;
+                  << "st, harmonic-CV=" << probe.coefficientOfVariation
+                  << ", sine-CV=" << sineProbe.coefficientOfVariation
+                  << ", harmonic-minRMS=" << probe.minimumRms
+                  << ", harmonic-maxRMS=" << probe.maximumRms
+                  << ", sine-minRMS=" << sineProbe.minimumRms
+                  << ", sine-maxRMS=" << sineProbe.maximumRms << std::endl;
     }
     std::cout << "PSOLA +5st RMS windows (220 Hz, fractional period):";
     for (double value : up.windowRms)
