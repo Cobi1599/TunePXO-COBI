@@ -982,6 +982,9 @@ struct HarmonicEnvelopeResult
 {
     double meanRms = 0.0;
     double coefficientOfVariation = 0.0;
+    double minimumRms = 0.0;
+    double maximumRms = 0.0;
+    std::vector<double> windowRms;
     bool finite = true;
 };
 
@@ -1026,7 +1029,6 @@ HarmonicEnvelopeResult measureHarmonicEnvelope(double semitones)
         }
     }
 
-    std::vector<double> windowRms;
     for (size_t start = 0; start + windowSamples <= captured.size(); start += windowSamples)
     {
         double energy = 0.0;
@@ -1035,21 +1037,23 @@ HarmonicEnvelopeResult measureHarmonicEnvelope(double semitones)
             const double sample = captured[start + static_cast<size_t>(i)];
             energy += sample * sample;
         }
-        windowRms.push_back(std::sqrt(energy / windowSamples));
+        result.windowRms.push_back(std::sqrt(energy / windowSamples));
     }
 
-    if (!windowRms.empty())
+    if (!result.windowRms.empty())
     {
-        for (double value : windowRms)
+        result.minimumRms = *std::min_element(result.windowRms.begin(), result.windowRms.end());
+        result.maximumRms = *std::max_element(result.windowRms.begin(), result.windowRms.end());
+        for (double value : result.windowRms)
             result.meanRms += value;
-        result.meanRms /= static_cast<double>(windowRms.size());
+        result.meanRms /= static_cast<double>(result.windowRms.size());
         double variance = 0.0;
-        for (double value : windowRms)
+        for (double value : result.windowRms)
         {
             const double delta = value - result.meanRms;
             variance += delta * delta;
         }
-        variance /= static_cast<double>(windowRms.size());
+        variance /= static_cast<double>(result.windowRms.size());
         result.coefficientOfVariation = result.meanRms > 0.0
             ? std::sqrt(variance) / result.meanRms : 1.0;
     }
@@ -1064,6 +1068,10 @@ bool testHarmonicVoiceEnvelope()
     const auto unshifted = measureHarmonicEnvelope(0.0);
     const auto down = measureHarmonicEnvelope(-5.0);
     const auto up = measureHarmonicEnvelope(5.0);
+    std::cout << "PSOLA +5st RMS windows:";
+    for (double value : up.windowRms)
+        std::cout << " " << value;
+    std::cout << std::endl;
     const double worstShiftedVariation = std::max(
         down.coefficientOfVariation, up.coefficientOfVariation);
     const bool passed = unshifted.finite && down.finite && up.finite
