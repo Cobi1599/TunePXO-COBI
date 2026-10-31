@@ -188,17 +188,22 @@ void Sola::Process(juce::AudioBuffer<float>& frame, int currentFramePeriod, doub
         }
 
         float* output = frame.getWritePointer(c);
-        const float* weights = mSynthesisWeight.getReadPointer(0, readStartIdx);
         for (int i = 0; i < mFrameSize; ++i) {
             const int weightIndex = (readStartIdx + i) % mSynthesis.numSamples;
             const float weight = mSynthesisWeight.getSample(0, weightIndex);
             output[i] = weight > 1.0e-4f ? output[i] / weight : 0.0f;
         }
 
-        mSynthesis.buffer.clear(c, readStartIdx, mFrameSize);
+        const int firstPart = std::min(mFrameSize, mSynthesis.numSamples - readStartIdx);
+        mSynthesis.buffer.clear(c, readStartIdx, firstPart);
+        if (firstPart < mFrameSize)
+            mSynthesis.buffer.clear(c, 0, mFrameSize - firstPart);
     }
 
-    mSynthesisWeight.clear(0, readStartIdx, mFrameSize);
+    const int weightFirstPart = std::min(mFrameSize, mSynthesis.numSamples - readStartIdx);
+    mSynthesisWeight.clear(0, readStartIdx, weightFirstPart);
+    if (weightFirstPart < mFrameSize)
+        mSynthesisWeight.clear(0, 0, mFrameSize - weightFirstPart);
 }
 
 } // namespace TD_pitch_shift
