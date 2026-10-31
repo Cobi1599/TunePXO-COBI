@@ -987,8 +987,11 @@ bool testReturnToZeroPhaseSweep()
     constexpr int transitionBlock = 80;
     constexpr int totalFrames = 150;
     constexpr int phaseOffsets[] = { 0, 1, 2, 3, 4, 5, 6, 7 };
+    constexpr int measuredLatency = 1358;
+    constexpr int localWindow = 256;
     const int period = static_cast<int>(std::lround(sampleRate / inputFrequency));
-    double worstRatio = 0.0;
+    double worstResidual = 0.0;
+    double worstDerivativeRatio = 0.0;
     bool finite = true;
 
     for (int phaseOffset : phaseOffsets)
@@ -1028,34 +1031,51 @@ bool testReturnToZeroPhaseSweep()
             }
         }
 
-        const int expected = transition * frameSize + 1358;
-        const int begin = std::max(1, expected - 2 * frameSize);
+        // Measure only around the latency-adjusted transition, not across
+        // several full frames where an ordinary sine-wave slope dominates.
+        const int expected = transition * frameSize + measuredLatency;
+        const int begin = std::max(1, expected - localWindow);
         const int end = std::min(static_cast<int>(dynamicOutput.size()) - 1,
-                                 expected + 2 * frameSize);
-        auto peakStep = [begin, end](const std::vector<float>& samples)
+                                 expected + localWindow);
+        double maxResidual = 0.0;
+        double residualEnergy = 0.0;
+        double dynamicDerivativePeak = 0.0;
+        double referenceDerivativePeak = 0.0;
+        int residualCount = 0;
+        for (int i = begin; i < end; ++i)
         {
-            double peak = 0.0;
-            for (int i = begin; i < end; ++i)
-                peak = std::max(peak, std::abs(static_cast<double>(samples[static_cast<size_t>(i)])
-                    - samples[static_cast<size_t>(i - 1)]));
-            return peak;
-        };
-        const double referencePeak = peakStep(referenceOutput);
-        const double dynamicPeak = peakStep(dynamicOutput);
-        const double ratio = referencePeak > 0.0 ? dynamicPeak / referencePeak : 0.0;
-        worstRatio = std::max(worstRatio, ratio);
-        std::cout << "PSOLA return-to-zero phase sweep offset=" << phaseOffset
+            const double residual = static_cast<double>(dynamicOutput[static_cast<size_t>(i)])
+                - referenceOutput[static_cast<size_t>(i)];
+            maxResidual = std::max(maxResidual, std::abs(residual));
+            residualEnergy += residual * residual;
+            ++residualCount;
+            dynamicDerivativePeak = std::max(dynamicDerivativePeak,
+                std::abs(static_cast<double>(dynamicOutput[static_cast<size_t>(i)])
+                    - dynamicOutput[static_cast<size_t>(i - 1)]));
+            referenceDerivativePeak = std::max(referenceDerivativePeak,
+                std::abs(static_cast<double>(referenceOutput[static_cast<size_t>(i)])
+                    - referenceOutput[static_cast<size_t>(i - 1)]));
+        }
+        const double residualRms = residualCount > 0
+            ? std::sqrt(residualEnergy / residualCount) : 0.0;
+        const double derivativeRatio = referenceDerivativePeak > 0.0
+            ? dynamicDerivativePeak / referenceDerivativePeak : 0.0;
+        worstResidual = std::max(worstResidual, maxResidual);
+        worstDerivativeRatio = std::max(worstDerivativeRatio, derivativeRatio);
+        std::cout << "PSOLA return-to-zero local transition offset=" << phaseOffset
                   << ", transition-block=" << transition
-                  << ", analysis-period=" << dynamicProcessor.getAnalysisPeriod()
-                  << ", synthesis-period=" << dynamicProcessor.getSynthesisPeriod()
                   << ", analysis-mark-offset=" << dynamicProcessor.getAnalysisMarkOffset()
                   << ", synthesis-mark-offset=" << dynamicProcessor.getSynthesisMarkOffset()
-                  << ", peak/reference=" << ratio << std::endl;
+                  << ", max-abs-residual=" << maxResidual
+                  << ", residual-rms=" << residualRms
+                  << ", local-derivative/reference=" << derivativeRatio << std::endl;
     }
 
-    std::cout << "PSOLA return-to-zero phase sweep: finite=" << finite
-              << ", worst peak/reference=" << worstRatio << std::endl;
-    return finite && std::isfinite(worstRatio) && worstRatio > 0.0;
+    std::cout << "PSOLA return-to-zero local sweep: finite=" << finite
+              << ", worst-max-abs-residual=" << worstResidual
+              << ", worst-local-derivative/reference=" << worstDerivativeRatio << std::endl;
+    return finite && std::isfinite(worstResidual) && std::isfinite(worstDerivativeRatio)
+        && worstDerivativeRatio > 0.0;
 }
 
 int measureProductionAdapterImpulsePeak(double sampleRate, double shift)
