@@ -1098,6 +1098,14 @@ bool testHarmonicVoiceEnvelope()
                   << ", sine-minRMS=" << sineProbe.minimumRms
                   << ", sine-maxRMS=" << sineProbe.maximumRms << std::endl;
     }
+    for (int harmonics : { 2, 3, 4, 6, 8 })
+    {
+        const auto probe = measureHarmonicEnvelope(8.0, 440.0, harmonics);
+        std::cout << "PSOLA 440Hz harmonic-count probe count=" << harmonics
+                  << ", CV=" << probe.coefficientOfVariation
+                  << ", minRMS=" << probe.minimumRms
+                  << ", maxRMS=" << probe.maximumRms << std::endl;
+    }
     std::cout << "PSOLA +5st RMS windows (220 Hz, fractional period):";
     for (double value : up.windowRms)
         std::cout << " " << value;
