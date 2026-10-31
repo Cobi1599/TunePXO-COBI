@@ -49,11 +49,22 @@ inline int Sola::getFrameSize() const noexcept{
     return mFrameSize;
 }
 
-void Sola::Process(juce::AudioBuffer<float>& frame, int currentFramePeriod, double semitones) {
+void Sola::Process(juce::AudioBuffer<float>& frame, double currentFramePeriod, double semitones) {
     assert(frame.getNumChannels() == mNumChannels);
     assert(frame.getNumSamples() == mFrameSize);
     assert(-12.0 <= semitones && semitones <= 12.0);
-    assert(0 < currentFramePeriod && currentFramePeriod <= mMaxPeriod);
+    assert(0.0 < currentFramePeriod && currentFramePeriod <= static_cast<double>(mMaxPeriod));
+
+    // Error-diffusion quantization distributes fractional pitch periods across
+    // adjacent marks (e.g. 200, 201, 200, 200...) instead of accumulating drift.
+    const auto quantizePeriod = [](double period, double& error) noexcept
+    {
+        const double adjusted = period + error;
+        const int integerPeriod = juce::jlimit(1, 2 * 1000000,
+            static_cast<int>(std::floor(adjusted)));
+        error = adjusted - static_cast<double>(integerPeriod);
+        return integerPeriod;
+    };
 
     // Push input samples to analysis circular buffer 
     for (int c = 0; c < mNumChannels; ++c) {
@@ -92,7 +103,7 @@ void Sola::Process(juce::AudioBuffer<float>& frame, int currentFramePeriod, doub
             mAnalysis.lastPeriod = analysisPeriod; 
 
             if(mPrevFrameEndOffset >= nextAnalysisOffset) 
-                analysisPeriod = currentFramePeriod;
+                analysisPeriod = quantizePeriod(currentFramePeriod, mAnalysisPeriodError);
 
             nextAnalysisOffset -= analysisPeriod;
         } 
@@ -164,7 +175,7 @@ void Sola::Process(juce::AudioBuffer<float>& frame, int currentFramePeriod, doub
 
             if(mPrevFrameEndOffset >= nextSynthesisOffset) {
                 const double stretchRatio = std::pow(2.0, -semitones / 12.0);
-                synthesisPeriod = static_cast<int>(std::lround(currentFramePeriod * stretchRatio));
+                synthesisPeriod = quantizePeriod(currentFramePeriod * stretchRatio, mSynthesisPeriodError);
             }
             nextSynthesisOffset -= synthesisPeriod;
         }
