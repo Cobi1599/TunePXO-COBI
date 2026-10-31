@@ -41,6 +41,8 @@ Sola::Sola(int numChannels, int frameSize, int maxPeriod) :
     mAnalysis.buffer.clear();
     mSynthesis.buffer.setSize(mNumChannels, mSynthesis.numSamples);
     mSynthesis.buffer.clear();
+    mSynthesisWeight.setSize(1, mSynthesis.numSamples);
+    mSynthesisWeight.clear();
 };
 
 inline int Sola::getFrameSize() const noexcept{
@@ -113,6 +115,25 @@ void Sola::Process(juce::AudioBuffer<float>& frame, int currentFramePeriod, doub
             assert(nextSynthesisOffset - grainSizeHalf > 0);
             const int synthesisStart = mSynthesis.OffsetToIdx(nextSynthesisOffset + grainSizeHalf); // Index where segment paste starts
             
+            // Accumulate the same Hann coverage used by the signal grains.
+            // The output is normalized by this envelope after all overlapping
+            // grains have been added, avoiding pitch-dependent gain modulation.
+            {
+                int remainingSamples = grainSize;
+                int windowOffset = 0;
+                int synthesisIdx = synthesisStart;
+                while (remainingSamples > 0) {
+                    const int samplesUntilWrap = mSynthesis.numSamples - synthesisIdx;
+                    const int samplesToProcess = std::min(remainingSamples, samplesUntilWrap);
+                    juce::FloatVectorOperations::add(
+                        mSynthesisWeight.getWritePointer(0, synthesisIdx),
+                        mWindowFunction.data() + windowOffset, samplesToProcess);
+                    remainingSamples -= samplesToProcess;
+                    windowOffset += samplesToProcess;
+                    synthesisIdx = (synthesisIdx + samplesToProcess) % mSynthesis.numSamples;
+                }
+            }
+
             // Overlap and Add 
             for(int c = 0; c < mNumChannels; ++c) {
                 int remainingSamples = grainSize;
@@ -159,17 +180,25 @@ void Sola::Process(juce::AudioBuffer<float>& frame, int currentFramePeriod, doub
         const int samplesUntilWrap = mSynthesis.numSamples - readStartIdx;
         if (samplesUntilWrap >= mFrameSize) {
             frame.copyFrom(c, 0, mSynthesis.buffer.getReadPointer(c, readStartIdx), mFrameSize);
-            mSynthesis.buffer.clear(c, readStartIdx, mFrameSize);
-        } 
-        else {
+        } else {
             const int partOneSize = samplesUntilWrap;
             const int partTwoSize = mFrameSize - partOneSize;
             frame.copyFrom(c, 0, mSynthesis.buffer.getReadPointer(c, readStartIdx), partOneSize);
             frame.copyFrom(c, partOneSize, mSynthesis.buffer.getReadPointer(c, 0), partTwoSize);
-            mSynthesis.buffer.clear(c, readStartIdx, partOneSize);
-            mSynthesis.buffer.clear(c, 0, partTwoSize);
         }
+
+        float* output = frame.getWritePointer(c);
+        const float* weights = mSynthesisWeight.getReadPointer(0, readStartIdx);
+        for (int i = 0; i < mFrameSize; ++i) {
+            const int weightIndex = (readStartIdx + i) % mSynthesis.numSamples;
+            const float weight = mSynthesisWeight.getSample(0, weightIndex);
+            output[i] = weight > 1.0e-4f ? output[i] / weight : 0.0f;
+        }
+
+        mSynthesis.buffer.clear(c, readStartIdx, mFrameSize);
     }
+
+    mSynthesisWeight.clear(0, readStartIdx, mFrameSize);
 }
 
 } // namespace TD_pitch_shift
