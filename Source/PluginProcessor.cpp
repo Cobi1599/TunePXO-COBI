@@ -370,10 +370,13 @@ void TunePXOCobiAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, j
     if (canProcessPsolaBlock) {
         juce::AudioBuffer<float> psolaBlock(
             psolaScratch.getArrayOfWritePointers(), 2, numSamples);
-        const int measuredPeriod = PsolaRealtimeAdapter::periodFromFrequency(
+        const double measuredPeriod = PsolaRealtimeAdapter::precisePeriodFromFrequency(
             currentSampleRate, (double)detectedFrequency.load(std::memory_order_relaxed));
-        if (measuredPeriod > 0) lastPsolaPeriod = measuredPeriod;
-        psola.process(psolaBlock, lastPsolaPeriod, (double)smoothedCorrectionSemitones);
+        const double psolaPeriod = measuredPeriod > 0.0
+            ? measuredPeriod : static_cast<double>(lastPsolaPeriod);
+        if (measuredPeriod > 0.0)
+            lastPsolaPeriod = static_cast<int>(std::lround(measuredPeriod));
+        psola.process(psolaBlock, psolaPeriod, (double)smoothedCorrectionSemitones);
 
     }
 
