@@ -978,6 +978,86 @@ bool testProductionAdapterFastGlide()
         && adapter.getOverflows() == 0;
 }
 
+bool testReturnToZeroPhaseSweep()
+{
+    constexpr double sampleRate = 44100.0;
+    constexpr double inputFrequency = 220.0;
+    constexpr int frameSize = 1024;
+    constexpr int maxPeriod = 679;
+    constexpr int transitionBlock = 80;
+    constexpr int totalFrames = 150;
+    constexpr int phaseOffsets[] = { 0, 1, 2, 3, 4, 5, 6, 7 };
+    const int period = static_cast<int>(std::lround(sampleRate / inputFrequency));
+    double worstRatio = 0.0;
+    bool finite = true;
+
+    for (int phaseOffset : phaseOffsets)
+    {
+        TD_pitch_shift::Sola dynamicProcessor(1, frameSize, maxPeriod);
+        TD_pitch_shift::Sola referenceProcessor(1, frameSize, maxPeriod);
+        juce::AudioBuffer<float> dynamicFrame(1, frameSize);
+        juce::AudioBuffer<float> referenceFrame(1, frameSize);
+        std::vector<float> dynamicOutput, referenceOutput;
+        dynamicOutput.reserve(totalFrames * frameSize);
+        referenceOutput.reserve(totalFrames * frameSize);
+        double phase = 0.0;
+        const int transition = transitionBlock + phaseOffset;
+
+        for (int block = 0; block < totalFrames; ++block)
+        {
+            auto* dynamicSamples = dynamicFrame.getWritePointer(0);
+            auto* referenceSamples = referenceFrame.getWritePointer(0);
+            for (int sample = 0; sample < frameSize; ++sample)
+            {
+                const float input = 0.4f * static_cast<float>(std::sin(phase));
+                dynamicSamples[sample] = input;
+                referenceSamples[sample] = input;
+                phase += juce::MathConstants<double>::twoPi * inputFrequency / sampleRate;
+                if (phase >= juce::MathConstants<double>::twoPi)
+                    phase -= juce::MathConstants<double>::twoPi;
+            }
+
+            dynamicProcessor.Process(dynamicFrame, period, block < transition ? -5.0 : 0.0);
+            referenceProcessor.Process(referenceFrame, period, 0.0);
+            for (int sample = 0; sample < frameSize; ++sample)
+            {
+                finite = finite && std::isfinite(dynamicSamples[sample])
+                    && std::isfinite(referenceSamples[sample]);
+                dynamicOutput.push_back(dynamicSamples[sample]);
+                referenceOutput.push_back(referenceSamples[sample]);
+            }
+        }
+
+        const int expected = transition * frameSize + 1358;
+        const int begin = std::max(1, expected - 2 * frameSize);
+        const int end = std::min(static_cast<int>(dynamicOutput.size()) - 1,
+                                 expected + 2 * frameSize);
+        auto peakStep = [begin, end](const std::vector<float>& samples)
+        {
+            double peak = 0.0;
+            for (int i = begin; i < end; ++i)
+                peak = std::max(peak, std::abs(static_cast<double>(samples[static_cast<size_t>(i)])
+                    - samples[static_cast<size_t>(i - 1)]));
+            return peak;
+        };
+        const double referencePeak = peakStep(referenceOutput);
+        const double dynamicPeak = peakStep(dynamicOutput);
+        const double ratio = referencePeak > 0.0 ? dynamicPeak / referencePeak : 0.0;
+        worstRatio = std::max(worstRatio, ratio);
+        std::cout << "PSOLA return-to-zero phase sweep offset=" << phaseOffset
+                  << ", transition-block=" << transition
+                  << ", analysis-period=" << dynamicProcessor.getAnalysisPeriod()
+                  << ", synthesis-period=" << dynamicProcessor.getSynthesisPeriod()
+                  << ", analysis-mark-offset=" << dynamicProcessor.getAnalysisMarkOffset()
+                  << ", synthesis-mark-offset=" << dynamicProcessor.getSynthesisMarkOffset()
+                  << ", peak/reference=" << ratio << std::endl;
+    }
+
+    std::cout << "PSOLA return-to-zero phase sweep: finite=" << finite
+              << ", worst peak/reference=" << worstRatio << std::endl;
+    return finite && std::isfinite(worstRatio) && worstRatio > 0.0;
+}
+
 int measureProductionAdapterImpulsePeak(double sampleRate, double shift)
 {
     constexpr int totalSamples = 65536;
@@ -1075,6 +1155,7 @@ int main()
     const bool fastPitchGlide = testFastPitchGlide();
     const bool sinusoidalDelayResponse = testSinusoidalDelayResponse();
     const bool abruptTransitions = testAbruptControlTransitions();
+    const bool returnToZeroPhaseSweep = testReturnToZeroPhaseSweep();
     const bool stereoPsola = testStereoPsola();
     const bool variableBlocks = testVariableHostBlocks();
     const bool productionAdapter = testProductionAdapter();
@@ -1083,7 +1164,7 @@ int main()
 
     if (!shiftedVoice1024 || !shiftedVoice2048 || !shiftedVoice4096 || !unshiftedLowVoice
         || !lowVoiceDown || !midVoiceUp || !highVoiceDown || !highVoiceUp
-        || impulsePeak < 0 || !adapterImpulseTests || !pitchGlide || !fastPitchGlide || !sinusoidalDelayResponse || !abruptTransitions || !stereoPsola || !variableBlocks || !productionAdapter || !productionAdapterFastGlide || !adapterControlAveraging)
+        || impulsePeak < 0 || !adapterImpulseTests || !pitchGlide || !fastPitchGlide || !sinusoidalDelayResponse || !abruptTransitions || !returnToZeroPhaseSweep || !stereoPsola || !variableBlocks || !productionAdapter || !productionAdapterFastGlide || !adapterControlAveraging)
     {
         std::cerr << "PSOLA quality test failed: shifted2048=" << shiftedVoice2048
                   << ", shifted1024=" << shiftedVoice1024 << ", shifted2048=" << shiftedVoice2048
