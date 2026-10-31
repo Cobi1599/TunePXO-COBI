@@ -55,7 +55,7 @@ public:
 
     // period is measured in samples at the plugin's full sample rate.
     // semitones follows the tested convention: negative values lower pitch.
-    void process(juce::AudioBuffer<float>& buffer, int period,
+    void process(juce::AudioBuffer<float>& buffer, double period,
                  double semitones) noexcept
     {
         if (processor == nullptr || buffer.getNumSamples() <= 0)
@@ -64,7 +64,7 @@ public:
         const int channels = juce::jlimit(1, maxChannels, buffer.getNumChannels());
         auto* left = buffer.getWritePointer(0);
         auto* right = channels > 1 ? buffer.getWritePointer(1) : nullptr;
-        const int safePeriod = juce::jlimit(1, maxPeriod, period);
+        const double safePeriod = juce::jlimit(1.0, static_cast<double>(maxPeriod), period);
         const double safeShift = juce::jlimit(-12.0, 12.0, semitones);
 
         for (int i = 0; i < buffer.getNumSamples(); ++i)
@@ -91,11 +91,11 @@ public:
                 frame.copyFrom(1, 0, inputFrame[1].data(), frameSize);
                 const double averageFrequency = periodFrequencySum
                     / static_cast<double>(parameterSampleCount);
-                const int framePeriod = juce::jlimit(1, maxPeriod,
-                    static_cast<int>(std::lround(1.0 / averageFrequency)));
+                const double framePeriod = juce::jlimit(1.0, static_cast<double>(maxPeriod),
+                    1.0 / averageFrequency);
                 const double frameShift = semitoneSum
                     / static_cast<double>(parameterSampleCount);
-                lastProcessedPeriod = framePeriod;
+                lastProcessedPeriod = static_cast<int>(std::lround(framePeriod));
                 lastProcessedSemitones = frameShift;
                 processor->Process(frame, framePeriod, frameShift);
                 periodFrequencySum = 0.0;
@@ -117,11 +117,17 @@ public:
     int getLastProcessedPeriod() const noexcept { return lastProcessedPeriod; }
     double getLastProcessedSemitones() const noexcept { return lastProcessedSemitones; }
 
-    static int periodFromFrequency(double sampleRate, double frequency) noexcept
+    static double precisePeriodFromFrequency(double sampleRate, double frequency) noexcept
     {
         if (!(sampleRate > 0.0) || !(frequency >= 65.0) || !std::isfinite(frequency))
-            return 0;
-        return static_cast<int>(std::lround(sampleRate / frequency));
+            return 0.0;
+        return sampleRate / frequency;
+    }
+
+    static int periodFromFrequency(double sampleRate, double frequency) noexcept
+    {
+        const double period = precisePeriodFromFrequency(sampleRate, frequency);
+        return period > 0.0 ? static_cast<int>(std::lround(period)) : 0;
     }
 
 private:
