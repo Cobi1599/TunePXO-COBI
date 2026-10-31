@@ -1068,20 +1068,31 @@ bool testHarmonicVoiceEnvelope()
     const auto down = measureHarmonicEnvelope(-5.0);
     const auto up = measureHarmonicEnvelope(5.0);
     const auto upExactPeriod = measureHarmonicEnvelope(5.0, 220.5);
+    double worstSweepVariation = 0.0;
+    bool sweepFinite = true;
+    constexpr double testFrequencies[] = { 110.0, 165.0, 330.0, 440.0 };
+    for (double frequency : testFrequencies)
+    {
+        const auto lower = measureHarmonicEnvelope(-5.0, frequency);
+        const auto upper = measureHarmonicEnvelope(5.0, frequency);
+        sweepFinite = sweepFinite && lower.finite && upper.finite
+            && lower.meanRms > 1.0e-4 && upper.meanRms > 1.0e-4;
+        worstSweepVariation = std::max(worstSweepVariation,
+            std::max(lower.coefficientOfVariation, upper.coefficientOfVariation));
+        std::cout << "PSOLA harmonic sweep frequency=" << frequency
+                  << "Hz, -5st CV=" << lower.coefficientOfVariation
+                  << ", +5st CV=" << upper.coefficientOfVariation << std::endl;
+    }
     std::cout << "PSOLA +5st RMS windows (220 Hz, fractional period):";
     for (double value : up.windowRms)
-        std::cout << " " << value;
-    std::cout << std::endl;
-    std::cout << "PSOLA +5st exact-period RMS windows (220.5 Hz):";
-    for (double value : upExactPeriod.windowRms)
         std::cout << " " << value;
     std::cout << std::endl;
     const double worstShiftedVariation = std::max(
         down.coefficientOfVariation, up.coefficientOfVariation);
     const bool passed = unshifted.finite && down.finite && up.finite && upExactPeriod.finite
-        && upExactPeriod.meanRms > 1.0e-4
+        && sweepFinite && upExactPeriod.meanRms > 1.0e-4
         && unshifted.meanRms > 1.0e-4 && down.meanRms > 1.0e-4 && up.meanRms > 1.0e-4
-        && worstShiftedVariation < 0.12
+        && worstShiftedVariation < 0.12 && worstSweepVariation < 0.12
         && worstShiftedVariation < unshifted.coefficientOfVariation + 0.10;
 
     std::cout << "PSOLA harmonic envelope: unshifted RMS=" << unshifted.meanRms
@@ -1090,8 +1101,8 @@ bool testHarmonicVoiceEnvelope()
               << " CV=" << down.coefficientOfVariation
               << ", +5st RMS=" << up.meanRms
               << " CV=" << up.coefficientOfVariation
-              << ", +5st exact-period 220.5Hz RMS=" << upExactPeriod.meanRms
-              << " CV=" << upExactPeriod.coefficientOfVariation
+              << ", +5st exact-period 220.5Hz CV=" << upExactPeriod.coefficientOfVariation
+              << ", sweep worst CV=" << worstSweepVariation
               << ", passed=" << passed << std::endl;
     return passed;
 }
