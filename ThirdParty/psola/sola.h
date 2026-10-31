@@ -48,6 +48,7 @@ private:
         }
     };
     CircularBuffer mAnalysis, mSynthesis;
+    juce::AudioBuffer<float> mSynthesisWeight;
 
     struct Region {
         const int startOffset;
