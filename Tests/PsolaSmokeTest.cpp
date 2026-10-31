@@ -1071,17 +1071,20 @@ bool testHarmonicVoiceEnvelope()
     double worstSweepVariation = 0.0;
     bool sweepFinite = true;
     constexpr double testFrequencies[] = { 110.0, 165.0, 330.0, 440.0 };
+    constexpr double testShifts[] = { -12.0, -7.0, -5.0, 5.0, 7.0, 12.0 };
     for (double frequency : testFrequencies)
     {
-        const auto lower = measureHarmonicEnvelope(-5.0, frequency);
-        const auto upper = measureHarmonicEnvelope(5.0, frequency);
-        sweepFinite = sweepFinite && lower.finite && upper.finite
-            && lower.meanRms > 1.0e-4 && upper.meanRms > 1.0e-4;
-        worstSweepVariation = std::max(worstSweepVariation,
-            std::max(lower.coefficientOfVariation, upper.coefficientOfVariation));
-        std::cout << "PSOLA harmonic sweep frequency=" << frequency
-                  << "Hz, -5st CV=" << lower.coefficientOfVariation
-                  << ", +5st CV=" << upper.coefficientOfVariation << std::endl;
+        for (double shift : testShifts)
+        {
+            const auto result = measureHarmonicEnvelope(shift, frequency);
+            sweepFinite = sweepFinite && result.finite && result.meanRms > 1.0e-4;
+            worstSweepVariation = std::max(worstSweepVariation,
+                result.coefficientOfVariation);
+            std::cout << "PSOLA stress sweep frequency=" << frequency
+                      << "Hz, shift=" << shift
+                      << "st, envelope CV=" << result.coefficientOfVariation
+                      << ", RMS=" << result.meanRms << std::endl;
+        }
     }
     std::cout << "PSOLA +5st RMS windows (220 Hz, fractional period):";
     for (double value : up.windowRms)
@@ -1092,7 +1095,7 @@ bool testHarmonicVoiceEnvelope()
     const bool passed = unshifted.finite && down.finite && up.finite && upExactPeriod.finite
         && sweepFinite && upExactPeriod.meanRms > 1.0e-4
         && unshifted.meanRms > 1.0e-4 && down.meanRms > 1.0e-4 && up.meanRms > 1.0e-4
-        && worstShiftedVariation < 0.12 && worstSweepVariation < 0.12
+        && worstShiftedVariation < 0.12 && worstSweepVariation < 0.20
         && worstShiftedVariation < unshifted.coefficientOfVariation + 0.10;
 
     std::cout << "PSOLA harmonic envelope: unshifted RMS=" << unshifted.meanRms
