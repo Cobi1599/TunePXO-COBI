@@ -999,6 +999,7 @@ HarmonicEnvelopeResult measureHarmonicEnvelope(double semitones)
     juce::AudioBuffer<float> frame(1, frameSize);
     std::vector<float> captured;
     captured.reserve(captureFrames * frameSize);
+    HarmonicEnvelopeResult result;
     double phase = 0.0;
 
     for (int block = 0; block < warmupFrames + captureFrames; ++block)
