@@ -995,7 +995,7 @@ HarmonicEnvelopeResult measureHarmonicEnvelope(double semitones, double frequenc
     constexpr int warmupFrames = 80;
     constexpr int captureFrames = 160;
     constexpr int windowSamples = 4096;
-    const int period = static_cast<int>(std::lround(sampleRate / frequency));
+    const double period = sampleRate / frequency;
     TD_pitch_shift::Sola processor(1, frameSize,
         static_cast<int>(std::ceil(sampleRate / 65.0)));
     juce::AudioBuffer<float> frame(1, frameSize);
