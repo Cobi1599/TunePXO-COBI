@@ -25,7 +25,7 @@ public:
     int getSynthesisPeriod() const noexcept { return mSynthesis.lastPeriod; }
     int getAnalysisMarkOffset() const noexcept { return mAnalysis.lastMarkOffset; }
     int getSynthesisMarkOffset() const noexcept { return mSynthesis.lastMarkOffset; }
-    void Process(juce::AudioBuffer<float>& frame, int currentFramePeriod, double semitones);
+    void Process(juce::AudioBuffer<float>& frame, double currentFramePeriod, double semitones);
 private:
     struct CircularBuffer {
         CircularBuffer(int head, int numSamples, int numChannels, int lastMarkOffset, int lastPeriod) : 
@@ -66,6 +66,8 @@ private:
     const int mFrameSize; 
     const int mNumChannels;
     const int mMaxPeriod;
+    double mAnalysisPeriodError = 0.0;
+    double mSynthesisPeriodError = 0.0;
 };
 
 } // namespace TD_pitch_shift
