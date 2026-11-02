@@ -988,7 +988,7 @@ struct HarmonicEnvelopeResult
     bool finite = true;
 };
 
-HarmonicEnvelopeResult measureHarmonicEnvelope(double semitones, double frequency = 220.0, int harmonicCount = 8)
+HarmonicEnvelopeResult measureHarmonicEnvelope(double semitones, double frequency = 220.0, int harmonicCount = 8, double initialPhase = 0.0)
 {
     constexpr double sampleRate = 44100.0;
     constexpr int frameSize = 1024;
@@ -1002,7 +1002,7 @@ HarmonicEnvelopeResult measureHarmonicEnvelope(double semitones, double frequenc
     std::vector<float> captured;
     captured.reserve(captureFrames * frameSize);
     HarmonicEnvelopeResult result;
-    double phase = 0.0;
+    double phase = initialPhase;
 
     for (int block = 0; block < warmupFrames + captureFrames; ++block)
     {
@@ -1103,6 +1103,17 @@ bool testHarmonicVoiceEnvelope()
         const auto probe = measureHarmonicEnvelope(8.0, 440.0, harmonics);
         std::cout << "PSOLA 440Hz harmonic-count probe count=" << harmonics
                   << ", CV=" << probe.coefficientOfVariation
+                  << ", minRMS=" << probe.minimumRms
+                  << ", maxRMS=" << probe.maximumRms << std::endl;
+    }
+    // Sweep the input waveform's absolute starting phase. A genuine pitch-mark
+    // alignment problem should vary with phase, while a pure gain/overlap issue
+    // should be comparatively insensitive to this offset.
+    for (double phaseOffset : { 0.0, 0.17, 0.5, 1.0, 1.57, 2.4 })
+    {
+        const auto probe = measureHarmonicEnvelope(8.0, 440.0, 8, phaseOffset);
+        std::cout << "PSOLA 440Hz input-phase probe phase=" << phaseOffset
+                  << "rad, CV=" << probe.coefficientOfVariation
                   << ", minRMS=" << probe.minimumRms
                   << ", maxRMS=" << probe.maximumRms << std::endl;
     }
